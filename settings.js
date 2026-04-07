@@ -12,6 +12,7 @@ import {
   getConversationIdForDirect,
   getConversationIdForGroup,
   getCurrentUser,
+  getDefaultSettings,
   getPinnedMessagesForUser,
   getSettings,
   importState,
@@ -57,6 +58,7 @@ const elements = {
   privacyReadReceipts: document.getElementById("privacy-read-receipts"),
   exportBtn: document.getElementById("export-btn"),
   importInput: document.getElementById("import-input"),
+  resetSettingsBtn: document.getElementById("reset-settings-btn"),
   resetBtn: document.getElementById("reset-btn"),
   globalSearch: document.getElementById("global-search"),
   globalResults: document.getElementById("global-search-results"),
@@ -118,6 +120,7 @@ function bindEvents() {
   elements.privacyReadReceipts.addEventListener("change", handlePrivacyChange);
   elements.exportBtn.addEventListener("click", handleExport);
   elements.importInput.addEventListener("change", handleImport);
+  elements.resetSettingsBtn.addEventListener("click", handleResetSettings);
   elements.resetBtn.addEventListener("click", handleReset);
   elements.globalSearch.addEventListener("input", renderSearchResults);
   activateNav(window.location.hash || "#section-profile");
@@ -396,6 +399,17 @@ function handleImport(event) {
     }
   };
   reader.readAsText(file);
+}
+
+function handleResetSettings() {
+  if (!confirm("Redefinir preferencias para o padrao?")) {
+    return;
+  }
+  settings = getDefaultSettings();
+  saveSettings(currentUser.id, settings);
+  applyTheme(settings);
+  applyDisplayPreferences(settings);
+  renderAll();
 }
 
 async function handleReset() {

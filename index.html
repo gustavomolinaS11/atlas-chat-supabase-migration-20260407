@@ -22,7 +22,7 @@
 
       <div class="auth-copy">
         <h1>Chat com login, contatos editaveis e grupos com admin.</h1>
-        <p>Fluxo local completo para testar contas diferentes, troca de mensagens, leitura e gestao de membros.</p>
+        <p>Fluxo local completo para testar contas diferentes, troca de mensagens, leitura e gestao de membros. Novas contas comecam limpas e recebem apenas o contato IA como guia inicial.</p>
       </div>
 
       <div class="auth-demo">
@@ -59,7 +59,8 @@
         </label>
         <label class="field">
           <span>Usuario</span>
-          <input id="register-username" type="text" placeholder="seuusuario" required>
+          <input id="register-username" type="text" placeholder="usuario.sem.espacos" required>
+          <small class="field-note">Sem espacos, acentos ou caracteres especiais fora de . _ -</small>
         </label>
         <label class="field">
           <span>Email</span>
@@ -72,6 +73,10 @@
         <label class="field">
           <span>Senha</span>
           <input id="register-password" type="password" placeholder="Crie uma senha" required>
+        </label>
+        <label class="field">
+          <span>Confirmar senha</span>
+          <input id="register-confirm-password" type="password" placeholder="Repita a senha" required>
         </label>
         <button class="primary-btn wide" type="submit">Criar conta</button>
       </form>

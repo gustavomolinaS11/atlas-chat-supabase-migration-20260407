@@ -13,27 +13,38 @@
   <div class="chat-app">
     <aside class="sidebar">
       <div class="sidebar-top">
-        <a class="brand" href="chat.html">
-          <span class="brand-mark">AT</span>
-          <span>
-            <strong>Atlas Chat</strong>
-            <small>Workspace local</small>
-          </span>
-        </a>
+        <div class="session-menu-wrap">
+          <button id="session-menu-btn" class="session-menu-btn" type="button" title="Conta logada">
+            <span id="session-avatar" class="current-user-avatar">ME</span>
+          </button>
+          <div id="session-menu" class="profile-popover hidden">
+            <div class="profile-popover-head">
+              <div id="session-popover-avatar" class="member-avatar">ME</div>
+              <div class="profile-popover-meta">
+                <strong id="session-name">Conta</strong>
+                <span id="session-handle">@user</span>
+              </div>
+            </div>
+          </div>
+        </div>
         <div class="sidebar-head-actions">
-          <button id="new-group-btn" class="icon-btn" type="button" title="Novo grupo"></button>
+          <div class="quick-create-wrap">
+            <button id="quick-create-btn" class="icon-btn" type="button" title="Criar"></button>
+            <div id="quick-create-menu" class="context-menu hidden">
+              <button class="context-menu-item" data-quick-action="add-contact" type="button">
+                <span class="context-menu-icon">+</span>
+                <span>Adicionar contato</span>
+              </button>
+              <button class="context-menu-item" data-quick-action="create-group" type="button">
+                <span class="context-menu-icon">+</span>
+                <span>Criar grupo</span>
+              </button>
+            </div>
+          </div>
           <a class="icon-link" href="settings.html" title="Configuracoes"></a>
           <button id="logout-btn" class="icon-btn" type="button" title="Sair"></button>
         </div>
       </div>
-
-      <section class="current-user-card">
-        <div id="session-avatar" class="current-user-avatar">ME</div>
-        <div class="current-user-meta">
-          <strong id="session-name">Conta</strong>
-          <span id="session-handle">@user</span>
-        </div>
-      </section>
 
       <label class="search-field">
         <span>Buscar conversa</span>
@@ -44,6 +55,7 @@
         <button class="filter-chip active" data-filter="all" type="button">Todas</button>
         <button class="filter-chip" data-filter="direct" type="button">Pessoas</button>
         <button class="filter-chip" data-filter="group" type="button">Grupos</button>
+        <button class="filter-chip" data-filter="archived" type="button">Arquivadas</button>
       </div>
 
       <div id="thread-list" class="thread-list"></div>
@@ -61,8 +73,26 @@
         <div class="chat-actions">
           <button id="conversation-search-btn" class="icon-btn" type="button" title="Buscar na conversa"></button>
           <button id="details-btn" class="icon-btn" type="button" title="Detalhes"></button>
+          <div class="conversation-menu-wrap">
+            <button id="conversation-menu-btn" class="icon-btn" type="button" title="Mais opcoes"></button>
+            <div id="conversation-menu" class="context-menu hidden"></div>
+          </div>
         </div>
       </header>
+
+      <section id="selection-bar" class="selection-bar hidden">
+        <div class="selection-copy">
+          <strong id="selection-count">0 mensagens</strong>
+          <span id="selection-hint">Selecao multipla ativa.</span>
+        </div>
+        <div class="selection-actions">
+          <button id="selection-copy-btn" class="icon-btn" type="button" title="Copiar"></button>
+          <button id="selection-favorite-btn" class="icon-btn" type="button" title="Favoritar"></button>
+          <button id="selection-forward-btn" class="icon-btn" type="button" title="Encaminhar"></button>
+          <button id="selection-delete-btn" class="icon-btn" type="button" title="Apagar"></button>
+          <button id="selection-cancel-btn" class="ghost-btn compact" type="button">Cancelar</button>
+        </div>
+      </section>
 
       <section id="pinned-banner" class="pinned-banner hidden"></section>
 
@@ -90,6 +120,7 @@
           <div class="composer-tools">
             <button id="emoji-btn" class="icon-btn" type="button" title="Emoji"></button>
             <button id="image-btn" class="icon-btn" type="button" title="Imagem"></button>
+            <button id="camera-btn" class="icon-btn" type="button" title="Foto na hora"></button>
             <button id="file-btn" class="icon-btn" type="button" title="Documento"></button>
             <button id="voice-btn" class="icon-btn" type="button" title="Audio"></button>
           </div>
@@ -116,6 +147,7 @@
   </div>
 
   <input id="image-input" type="file" accept="image/*" hidden>
+  <input id="camera-input" type="file" accept="image/*" capture="environment" hidden>
   <input id="doc-input" type="file" accept=".pdf,.doc,.docx,.txt,.xls,.xlsx" hidden>
 
   <div id="emoji-panel" class="floating-panel hidden"></div>
@@ -137,6 +169,31 @@
     <button id="lightbox-close" class="lightbox-close" type="button">Fechar</button>
     <img id="lightbox-img" alt="preview">
   </div>
+
+  <div id="camera-layer" class="camera-layer hidden">
+    <div class="camera-card">
+      <div class="camera-head">
+        <div>
+          <div class="card-kicker">Camera</div>
+          <h2>Foto na hora</h2>
+        </div>
+        <button id="camera-close" class="icon-btn" type="button" title="Fechar"></button>
+      </div>
+      <div class="camera-stage">
+        <video id="camera-video" autoplay playsinline muted></video>
+        <div class="camera-grid" aria-hidden="true"></div>
+      </div>
+      <div class="camera-actions">
+        <span id="camera-status" class="muted-line">Abrindo camera...</span>
+        <div class="camera-action-buttons">
+          <button id="camera-fallback-btn" class="ghost-btn compact" type="button">Usar seletor</button>
+          <button id="camera-capture-btn" class="primary-btn" type="button" disabled>Capturar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="undo-toast" class="undo-toast hidden"></div>
 
   <script type="module" src="app.js"></script>
 </body>

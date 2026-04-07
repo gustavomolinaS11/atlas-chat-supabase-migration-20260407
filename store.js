@@ -1,8 +1,9 @@
-﻿const STATE_KEY = "atlas.state.v4";
+﻿const STATE_KEY = "atlas.state.v6";
 const SESSION_KEY = "atlas.session.v4";
 const USERS_URL = "data/users.json";
 const THREADS_URL = "data/threads.json";
 const MESSAGES_URL = "data/messages.json";
+const ASSISTANT_USER_ID = "u-ia";
 
 const DEFAULT_SETTINGS = {
   mode: "dark",
@@ -51,6 +52,22 @@ export const FEATURE_LIST = [
   "Upload de imagem, documento e audio"
 ];
 
+const ASSISTANT_USER = {
+  id: ASSISTANT_USER_ID,
+  name: "IA",
+  username: "ia",
+  email: "ia@atlas.local",
+  password: "__assistant__",
+  avatar: "IA",
+  photo: "",
+  bio: "Guia do Atlas: explica conversas, grupos, audio, perfil, privacidade e atalhos.",
+  kind: "assistant",
+  lastSeenAt: Date.now(),
+  contactIds: [],
+  pinnedConversationIds: [],
+  contactEdits: {}
+};
+
 const DEFAULT_USERS = [
   { id: "u-gustavo", name: "Gustavo", username: "gustavo", email: "gustavo@atlas.local", password: "demo123", avatar: "GU", bio: "Owner", lastSeenAt: Date.now() - 12 * 60 * 1000, contactEdits: {} },
   { id: "u-ana", name: "Ana Costa", username: "ana", email: "ana@atlas.local", password: "demo123", avatar: "AN", bio: "Design lead", lastSeenAt: Date.now() - 18 * 60 * 1000, contactEdits: {} },
@@ -94,6 +111,23 @@ function buildInitials(name) {
   return String(name || "AT").split(" ").filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase();
 }
 
+function uniqueStrings(values) {
+  return [...new Set((Array.isArray(values) ? values : []).map(String))];
+}
+
+function sanitizeUsername(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/\s+/g, "")
+    .replace(/[^a-zA-Z0-9._-]/g, "")
+    .toLowerCase();
+}
+
+function isValidUsername(value) {
+  return /^[a-z0-9._-]{3,}$/.test(String(value || ""));
+}
+
 function normalizePrivacy(value) {
   const source = value && typeof value === "object" ? value : {};
   const pick = (key) => source[key] === "nobody" ? "nobody" : "everyone";
@@ -129,24 +163,36 @@ function normalizeSettingsRecord(value) {
   };
 }
 
+function normalizeClearMap(value) {
+  const source = value && typeof value === "object" ? value : {};
+  return Object.fromEntries(
+    Object.entries(source)
+      .filter(([, timestamp]) => Number.isFinite(Number(timestamp)) && Number(timestamp) > 0)
+      .map(([userId, timestamp]) => [String(userId), Number(timestamp)])
+  );
+}
+
 function normalizeUser(user, index) {
   return {
     id: String(user.id || `u-${index + 1}`),
     name: String(user.name || `User ${index + 1}`),
-    username: String(user.username || `user${index + 1}`).toLowerCase(),
+    username: sanitizeUsername(String(user.username || `user${index + 1}`)),
     email: String(user.email || `user${index + 1}@atlas.local`).toLowerCase(),
     password: String(user.password || "demo123"),
     avatar: String(user.avatar || buildInitials(user.name || `U${index + 1}`)).slice(0, 2).toUpperCase(),
     photo: typeof user.photo === "string" ? user.photo : "",
     bio: String(user.bio || "Team"),
+    kind: user.kind === "assistant" ? "assistant" : "user",
     lastSeenAt: Number.isFinite(user.lastSeenAt) ? user.lastSeenAt : Date.now(),
+    contactIds: uniqueStrings(user.contactIds).filter((contactId) => contactId !== String(user.id || `u-${index + 1}`)),
+    pinnedConversationIds: uniqueStrings(user.pinnedConversationIds),
     contactEdits: user.contactEdits && typeof user.contactEdits === "object" ? user.contactEdits : {}
   };
 }
 
 function normalizeThread(thread, index) {
   const type = thread.type === "group" ? "group" : "direct";
-  const memberIds = Array.isArray(thread.memberIds) ? [...new Set(thread.memberIds.map(String))] : [];
+  const memberIds = uniqueStrings(thread.memberIds);
   return {
     id: String(thread.id || `t-${index + 1}`),
     type,
@@ -155,10 +201,11 @@ function normalizeThread(thread, index) {
     photo: typeof thread.photo === "string" ? thread.photo : "",
     description: String(thread.description || ""),
     memberIds,
-    admins: Array.isArray(thread.admins) ? [...new Set(thread.admins.map(String))] : [],
+    admins: uniqueStrings(thread.admins),
     createdBy: String(thread.createdBy || memberIds[0] || ""),
     createdAt: Number.isFinite(thread.createdAt) ? thread.createdAt : Date.now(),
-    archivedBy: Array.isArray(thread.archivedBy) ? [...new Set(thread.archivedBy.map(String))] : []
+    archivedBy: uniqueStrings(thread.archivedBy),
+    clearedAtBy: normalizeClearMap(thread.clearedAtBy)
   };
 }
 
@@ -186,19 +233,41 @@ function normalizeMessage(message, index, threadMap) {
       docs: Array.isArray(attachments.docs) ? attachments.docs : [],
       audio: Array.isArray(attachments.audio) ? attachments.audio : []
     },
-    pinnedBy: Array.isArray(message.pinnedBy) ? [...new Set(message.pinnedBy.map(String))] : [],
-    favoriteBy: Array.isArray(message.favoriteBy) ? [...new Set(message.favoriteBy.map(String))] : [],
-    reactions: Object.fromEntries(Object.entries(reactions).map(([token, userIds]) => [token, Array.isArray(userIds) ? [...new Set(userIds.map(String))] : []])),
+    pinnedBy: uniqueStrings(message.pinnedBy),
+    favoriteBy: uniqueStrings(message.favoriteBy),
+    hiddenFor: uniqueStrings(message.hiddenFor),
+    reactions: Object.fromEntries(Object.entries(reactions).map(([token, userIds]) => [token, uniqueStrings(userIds)])),
     receipts
   };
 }
+
 function normalizeState(input) {
-  const users = (Array.isArray(input.users) ? input.users : []).map(normalizeUser);
+  const seededUsers = (Array.isArray(input.users) ? input.users : []).map(normalizeUser);
+  const users = seededUsers.some((user) => user.id === ASSISTANT_USER_ID)
+    ? seededUsers
+    : [...seededUsers, normalizeUser(ASSISTANT_USER, seededUsers.length)];
   const threads = (Array.isArray(input.threads) ? input.threads : []).map(normalizeThread);
   const validUserIds = new Set(users.map((user) => user.id));
   const cleanedThreads = threads
-    .map((thread) => ({ ...thread, memberIds: thread.memberIds.filter((memberId) => validUserIds.has(memberId)), admins: thread.admins.filter((adminId) => validUserIds.has(adminId)) }))
+    .map((thread) => ({
+      ...thread,
+      memberIds: thread.memberIds.filter((memberId) => validUserIds.has(memberId)),
+      admins: thread.admins.filter((adminId) => validUserIds.has(adminId)),
+      archivedBy: thread.archivedBy.filter((userId) => validUserIds.has(userId)),
+      clearedAtBy: Object.fromEntries(Object.entries(thread.clearedAtBy).filter(([userId]) => validUserIds.has(userId)))
+    }))
     .filter((thread) => thread.type === "group" ? thread.memberIds.length >= 2 : thread.memberIds.length === 2);
+  const migratedUsers = users.map((user) => {
+    const directThreadContacts = cleanedThreads
+      .filter((thread) => thread.type === "direct" && thread.memberIds.includes(user.id))
+      .map((thread) => thread.memberIds.find((memberId) => memberId !== user.id))
+      .filter(Boolean);
+    return {
+      ...user,
+      contactIds: uniqueStrings([...user.contactIds.filter((contactId) => validUserIds.has(contactId) && contactId !== user.id), ...directThreadContacts]),
+      pinnedConversationIds: uniqueStrings(user.pinnedConversationIds)
+    };
+  });
   const threadMap = new Map(cleanedThreads.map((thread) => [thread.id, thread]));
   const messages = (Array.isArray(input.messages) ? input.messages : [])
     .map((message, index) => normalizeMessage(message, index, threadMap))
@@ -206,14 +275,19 @@ function normalizeState(input) {
   const settings = input.settings && typeof input.settings === "object"
     ? Object.fromEntries(Object.entries(input.settings).map(([userId, value]) => [userId, normalizeSettingsRecord(value)]))
     : {};
-  return {
-    version: 5,
-    users,
+  const normalizedState = {
+    version: 8,
+    users: migratedUsers,
     threads: cleanedThreads,
     messages: messages.sort((left, right) => left.createdAt - right.createdAt),
     settings,
     drafts: input.drafts && typeof input.drafts === "object" ? input.drafts : {}
   };
+  normalizedState.users
+    .filter((user) => !isAssistantUser(user))
+    .forEach((user) => seedAssistantConversation(normalizedState, user.id));
+  normalizedState.messages.sort((left, right) => left.createdAt - right.createdAt);
+  return normalizedState;
 }
 
 async function fetchSeedArray(url, fallback) {
@@ -233,7 +307,7 @@ async function buildSeedState() {
   const users = await fetchSeedArray(USERS_URL, DEFAULT_USERS);
   const threads = await fetchSeedArray(THREADS_URL, DEFAULT_THREADS);
   const messages = await fetchSeedArray(MESSAGES_URL, DEFAULT_MESSAGES);
-  return normalizeState({ version: 5, users, threads, messages, settings: {}, drafts: {} });
+  return normalizeState({ version: 8, users, threads, messages, settings: {}, drafts: {} });
 }
 
 function readState() {
@@ -293,8 +367,144 @@ function resolveThreadFromConversation(state, userId, conversationId, createDire
   }
   let thread = getDirectThreadBetween(state, userId, parsed.targetId);
   if (!thread && createDirect) {
-    thread = { id: uid("t-dm"), type: "direct", title: "", avatar: "", description: "", memberIds: [userId, parsed.targetId].sort(), admins: [userId], createdBy: userId, createdAt: Date.now(), archivedBy: [] };
+    thread = {
+      id: uid("t-dm"),
+      type: "direct",
+      title: "",
+      avatar: "",
+      description: "",
+      memberIds: [userId, parsed.targetId].sort(),
+      admins: [userId],
+      createdBy: userId,
+      createdAt: Date.now(),
+      archivedBy: [],
+      clearedAtBy: {}
+    };
     state.threads.push(thread);
+    const owner = findUser(state, userId);
+    if (owner) {
+      owner.contactIds = uniqueStrings([...owner.contactIds, parsed.targetId]);
+    }
+  }
+  return thread;
+}
+
+function getThreadClearTimestamp(thread, userId) {
+  if (!thread || !thread.clearedAtBy || !userId) {
+    return 0;
+  }
+  return Number.isFinite(thread.clearedAtBy[userId]) ? thread.clearedAtBy[userId] : 0;
+}
+
+function isMessageVisibleForUser(thread, userId, message) {
+  return message.createdAt > getThreadClearTimestamp(thread, userId) && !message.hiddenFor.includes(userId);
+}
+
+function isAssistantUser(user) {
+  return Boolean(user && user.kind === "assistant");
+}
+
+function buildAssistantReplyText(text) {
+  const normalized = String(text || "").trim().toLowerCase();
+  if (!normalized) {
+    return "Posso te orientar por aqui. Pergunte sobre grupos, adicionar contato, audio com waveform, favoritos, fixar conversa, arquivar, limpar historico ou configuracoes.";
+  }
+  if (/(grupo|admin|membro)/.test(normalized)) {
+    return "Grupos sao gerenciados no painel de detalhes. Admin pode editar grupo, adicionar membros, promover admin e remover pessoas com confirmacao.";
+  }
+  if (/(contato|usuario|adicionar|novo chat|\+)/.test(normalized)) {
+    return "No botao + da sidebar voce pode adicionar contato ou criar grupo. Para adicionar contato, basta buscar pelo usuario sem @ e selecionar a conta.";
+  }
+  if (/(fix|pin|arquiv|histor)/.test(normalized)) {
+    return "No menu da conversa voce consegue fixar no topo, arquivar para tirar da lista principal e limpar o historico so para a sua conta.";
+  }
+  if (/(favorit|estrela|reag)/.test(normalized)) {
+    return "Mensagens podem receber uma unica reacao por usuario. Favoritos ficam marcados com estrela e podem ser consultados em Configuracoes.";
+  }
+  if (/(audio|voz|microfone|onda|wave)/.test(normalized)) {
+    return "Para gravar audio, use o microfone no composer. Enquanto grava, a interface mostra a waveform em tempo real; depois voce pode ouvir o preview antes de enviar.";
+  }
+  if (/(tema|privacidade|config|perfil|foto)/.test(normalized)) {
+    return "Em Configuracoes voce ajusta tema, foto, privacidade, leitura, comportamento visual, favoritos, pins e preferencias das conversas.";
+  }
+  if (/(respost|reply|mensagem|pular|buscar)/.test(normalized)) {
+    return "Voce pode responder mensagens, clicar na resposta para pular ate a original, buscar dentro da conversa e abrir detalhes do contato ou do grupo.";
+  }
+  if (/(^|\b)(oi|ola|hello|ajuda)(\b|$)/.test(normalized)) {
+    return "Oi. Eu sou a IA do Atlas. Posso te explicar conversas privadas, grupos, contatos, audio, configuracoes, atalhos e o fluxo do sistema.";
+  }
+  return "Eu consigo te orientar sobre contatos, conversas privadas, grupos, audio, pins, arquivamento, favoritos, privacidade e configuracoes da interface.";
+}
+
+function seedAssistantConversation(state, userId) {
+  const assistant = findUser(state, ASSISTANT_USER_ID);
+  const user = findUser(state, userId);
+  if (!assistant || !user) {
+    return null;
+  }
+  user.contactIds = uniqueStrings([...user.contactIds, ASSISTANT_USER_ID]);
+  let thread = getDirectThreadBetween(state, userId, ASSISTANT_USER_ID);
+  if (!thread) {
+    thread = normalizeThread({
+      id: uid("t-dm"),
+      type: "direct",
+      title: "",
+      avatar: "",
+      description: "",
+      memberIds: [userId, ASSISTANT_USER_ID],
+      admins: [userId],
+      createdBy: ASSISTANT_USER_ID,
+      createdAt: Date.now(),
+      archivedBy: [],
+      clearedAtBy: {}
+    }, state.threads.length);
+    state.threads.push(thread);
+  }
+  if (!state.messages.some((message) => message.threadId === thread.id)) {
+    const threadMap = new Map(state.threads.map((item) => [item.id, item]));
+    const receipts = { [ASSISTANT_USER_ID]: "read", [userId]: "read" };
+    state.messages.push(normalizeMessage({
+      id: uid("m"),
+      threadId: thread.id,
+      senderId: ASSISTANT_USER_ID,
+      text: `Oi, ${user.name}. Eu sou a IA do Atlas e vou te orientar no sistema.`,
+      createdAt: Date.now() - 1000,
+      editedAt: null,
+      replyTo: null,
+      attachments: { images: [], docs: [], audio: [] },
+      pinnedBy: [],
+      favoriteBy: [],
+      reactions: {},
+      receipts
+    }, state.messages.length, threadMap));
+    state.messages.push(normalizeMessage({
+      id: uid("m"),
+      threadId: thread.id,
+      senderId: ASSISTANT_USER_ID,
+      text: "Pergunte, por exemplo: como crio um grupo, onde ficam os favoritos, como fixo ou arquivo uma conversa e onde altero perfil e privacidade.",
+      createdAt: Date.now(),
+      editedAt: null,
+      replyTo: null,
+      attachments: { images: [], docs: [], audio: [] },
+      pinnedBy: [],
+      favoriteBy: [],
+      reactions: {},
+      receipts
+    }, state.messages.length + 1, threadMap));
+    state.messages.push(normalizeMessage({
+      id: uid("m"),
+      threadId: thread.id,
+      senderId: ASSISTANT_USER_ID,
+      text: "Tambem posso te orientar sobre adicionar contatos, responder mensagens, gravar audio com waveform, mudar tema e organizar grupos.",
+      createdAt: Date.now() + 1,
+      editedAt: null,
+      replyTo: null,
+      attachments: { images: [], docs: [], audio: [] },
+      pinnedBy: [],
+      favoriteBy: [],
+      reactions: {},
+      receipts
+    }, state.messages.length + 2, threadMap));
   }
   return thread;
 }
@@ -336,23 +546,33 @@ function getUserPresence(state, userId) {
 }
 
 function getUnreadCountForThread(state, userId, threadId) {
-  return state.messages.filter((message) => message.threadId === threadId && message.senderId !== userId && message.receipts[userId] !== "read").length;
+  const thread = findThread(state, threadId);
+  if (!thread) {
+    return 0;
+  }
+  return state.messages.filter((message) => message.threadId === threadId && isMessageVisibleForUser(thread, userId, message) && message.senderId !== userId && message.receipts[userId] !== "read").length;
 }
 
-function getLastMessageForThread(state, threadId) {
-  const items = state.messages.filter((message) => message.threadId === threadId);
+function getLastMessageForThread(state, threadId, userId = null) {
+  const thread = findThread(state, threadId);
+  if (!thread) {
+    return null;
+  }
+  const items = state.messages.filter((message) => message.threadId === threadId && (!userId || isMessageVisibleForUser(thread, userId, message)));
   return items.length ? items[items.length - 1] : null;
 }
 
 function buildDirectEntry(state, userId, otherUser) {
+  const owner = findUser(state, userId);
   const thread = getDirectThreadBetween(state, userId, otherUser.id);
-  const lastMessage = thread ? getLastMessageForThread(state, thread.id) : null;
+  const conversationId = buildConversationId("direct", otherUser.id);
+  const lastMessage = thread ? getLastMessageForThread(state, thread.id, userId) : null;
   const edit = getContactEdit(state, userId, otherUser.id);
   const canSeeProfilePhoto = canViewerSeePrivacy(state, userId, otherUser.id, "profilePhoto");
   const canSeeLastSeen = canViewerSeePrivacy(state, userId, otherUser.id, "lastSeen");
   const presence = canSeeLastSeen ? getUserPresence(state, otherUser.id) : "private";
   return {
-    id: buildConversationId("direct", otherUser.id),
+    id: conversationId,
     type: "direct",
     threadId: thread?.id || null,
     targetUserId: otherUser.id,
@@ -366,14 +586,18 @@ function buildDirectEntry(state, userId, otherUser) {
     lastSeenAt: canSeeLastSeen ? otherUser.lastSeenAt : null,
     lastMessage,
     unreadCount: thread ? getUnreadCountForThread(state, userId, thread.id) : 0,
-    timestamp: lastMessage?.createdAt || 0
+    timestamp: lastMessage?.createdAt || thread?.createdAt || 0,
+    isArchived: Boolean(thread?.archivedBy.includes(userId)),
+    isPinnedConversation: Boolean(owner?.pinnedConversationIds.includes(conversationId))
   };
 }
 
 function buildGroupEntry(state, userId, thread) {
-  const lastMessage = getLastMessageForThread(state, thread.id);
+  const owner = findUser(state, userId);
+  const conversationId = buildConversationId("group", thread.id);
+  const lastMessage = getLastMessageForThread(state, thread.id, userId);
   return {
-    id: buildConversationId("group", thread.id),
+    id: conversationId,
     type: "group",
     threadId: thread.id,
     targetUserId: null,
@@ -387,7 +611,9 @@ function buildGroupEntry(state, userId, thread) {
     lastSeenAt: null,
     lastMessage,
     unreadCount: getUnreadCountForThread(state, userId, thread.id),
-    timestamp: lastMessage?.createdAt || thread.createdAt
+    timestamp: lastMessage?.createdAt || thread.createdAt,
+    isArchived: thread.archivedBy.includes(userId),
+    isPinnedConversation: Boolean(owner?.pinnedConversationIds.includes(conversationId))
   };
 }
 
@@ -438,7 +664,7 @@ function getSenderStatus(state, message, thread, userId) {
 
 export async function ensureStore() {
   const existing = readState();
-  if (existing && existing.version === 5) {
+  if (existing && existing.version === 8) {
     writeState(existing);
     return;
   }
@@ -493,11 +719,15 @@ export function loginUser(identifier, password) {
 export function registerUser(payload) {
   return withState((state) => {
     const name = String(payload.name || "").trim();
-    const username = String(payload.username || "").trim().toLowerCase();
+    const rawUsername = String(payload.username || "").trim();
+    const username = sanitizeUsername(rawUsername);
     const email = String(payload.email || "").trim().toLowerCase();
     const password = String(payload.password || "").trim();
-    if (!name || !username || !email || !password) {
+    if (!name || !rawUsername || !email || !password) {
       return { ok: false, error: "Preencha todos os campos" };
+    }
+    if (rawUsername !== username || !isValidUsername(username)) {
+      return { ok: false, error: "Usuario sem acentos ou espacos. Use ao menos 3 caracteres: letras, numeros, . _ -" };
     }
     if (state.users.some((user) => user.username === username)) {
       return { ok: false, error: "Username ja existe" };
@@ -505,8 +735,22 @@ export function registerUser(payload) {
     if (state.users.some((user) => user.email === email)) {
       return { ok: false, error: "Email ja existe" };
     }
-    const user = normalizeUser({ id: uid("u"), name, username, email, password, avatar: buildInitials(name), bio: payload.bio || "Member", lastSeenAt: Date.now(), contactEdits: {} }, state.users.length);
+    const user = normalizeUser({
+      id: uid("u"),
+      name,
+      username,
+      email,
+      password,
+      avatar: buildInitials(name),
+      bio: payload.bio || "Member",
+      kind: "user",
+      lastSeenAt: Date.now(),
+      contactIds: [ASSISTANT_USER_ID],
+      pinnedConversationIds: [],
+      contactEdits: {}
+    }, state.users.length);
     state.users.push(user);
+    seedAssistantConversation(state, user.id);
     ensureSettingsRecord(state, user.id);
     ensureDraftRecord(state, user.id);
     localStorage.setItem(SESSION_KEY, user.id);
@@ -534,6 +778,10 @@ export function getSettings(userId) {
     return normalizeSettingsRecord();
   }
   return normalizeSettingsRecord(ensureSettingsRecord(state, userId));
+}
+
+export function getDefaultSettings() {
+  return normalizeSettingsRecord();
 }
 
 export function saveSettings(userId, patch) {
@@ -564,6 +812,18 @@ export function applyTheme(settings) {
     root.setProperty("--panel-strong", "rgba(255, 255, 255, 0.98)");
     root.setProperty("--surface", "rgba(11, 22, 38, 0.04)");
     root.setProperty("--surface-strong", "rgba(11, 22, 38, 0.08)");
+    root.setProperty("--input-bg", "rgba(11, 22, 38, 0.05)");
+    root.setProperty("--card-bg", "rgba(255, 255, 255, 0.78)");
+    root.setProperty("--card-bg-strong", "rgba(255, 255, 255, 0.9)");
+    root.setProperty("--header-shell", "linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(246, 250, 255, 0.92))");
+    root.setProperty("--composer-shell", "linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(245, 249, 255, 0.98))");
+    root.setProperty("--composer-shadow", "0 -10px 24px rgba(11, 22, 38, 0.08)");
+    root.setProperty("--message-card-bg", "rgba(255, 255, 255, 0.88)");
+    root.setProperty("--message-card-shadow", "0 12px 32px rgba(22, 36, 60, 0.08)");
+    root.setProperty("--message-own-bg", "linear-gradient(135deg, rgba(53, 194, 255, 0.16), rgba(69, 224, 177, 0.12))");
+    root.setProperty("--message-own-border", "rgba(53, 194, 255, 0.18)");
+    root.setProperty("--message-text-shadow", "0 1px 0 rgba(255, 255, 255, 0.55)");
+    root.setProperty("--toast-bg", "rgba(255, 255, 255, 0.98)");
     root.setProperty("--text", "#0b1626");
     root.setProperty("--muted", "#5c6c84");
     root.setProperty("--border", "rgba(11, 22, 38, 0.09)");
@@ -576,6 +836,18 @@ export function applyTheme(settings) {
     root.setProperty("--panel-strong", "rgba(10, 19, 35, 0.96)");
     root.setProperty("--surface", "rgba(255, 255, 255, 0.04)");
     root.setProperty("--surface-strong", "rgba(255, 255, 255, 0.08)");
+    root.setProperty("--input-bg", "rgba(0, 0, 0, 0.2)");
+    root.setProperty("--card-bg", "rgba(255, 255, 255, 0.04)");
+    root.setProperty("--card-bg-strong", "rgba(255, 255, 255, 0.07)");
+    root.setProperty("--header-shell", "linear-gradient(180deg, rgba(8, 18, 32, 0.98), rgba(8, 18, 32, 0.82))");
+    root.setProperty("--composer-shell", "linear-gradient(180deg, rgba(8, 18, 32, 0.78), rgba(8, 18, 32, 0.95))");
+    root.setProperty("--composer-shadow", "0 -10px 24px rgba(0, 0, 0, 0.18)");
+    root.setProperty("--message-card-bg", "rgba(255, 255, 255, 0.07)");
+    root.setProperty("--message-card-shadow", "0 10px 30px rgba(0, 0, 0, 0.16)");
+    root.setProperty("--message-own-bg", "linear-gradient(135deg, rgba(53, 194, 255, 0.22), rgba(69, 224, 177, 0.16))");
+    root.setProperty("--message-own-border", "rgba(53, 194, 255, 0.2)");
+    root.setProperty("--message-text-shadow", "0 1px 0 rgba(0, 0, 0, 0.24)");
+    root.setProperty("--toast-bg", "rgba(8, 18, 32, 0.96)");
     root.setProperty("--text", "#f5f8ff");
     root.setProperty("--muted", "#92a2bd");
     root.setProperty("--border", "rgba(255, 255, 255, 0.08)");
@@ -623,15 +895,37 @@ export function getConversationEntries(userId, query = "", filter = "all") {
   if (!state) {
     return [];
   }
+  const viewer = findUser(state, userId);
+  if (!viewer) {
+    return [];
+  }
   const normalizedQuery = String(query || "").trim().toLowerCase();
-  const directEntries = state.users.filter((user) => user.id !== userId).map((user) => buildDirectEntry(state, userId, user));
-  const groupEntries = state.threads.filter((thread) => thread.type === "group" && thread.memberIds.includes(userId)).map((thread) => buildGroupEntry(state, userId, thread));
+  const directUserIds = new Set(viewer.contactIds);
+  state.threads
+    .filter((thread) => thread.type === "direct" && thread.memberIds.includes(userId))
+    .forEach((thread) => {
+      const otherId = thread.memberIds.find((memberId) => memberId !== userId);
+      if (otherId) {
+        directUserIds.add(otherId);
+      }
+    });
+  const directEntries = [...directUserIds]
+    .map((otherUserId) => findUser(state, otherUserId))
+    .filter((user) => user && user.id !== userId)
+    .map((user) => buildDirectEntry(state, userId, user));
+  const groupEntries = state.threads
+    .filter((thread) => thread.type === "group" && thread.memberIds.includes(userId))
+    .map((thread) => buildGroupEntry(state, userId, thread));
   return [...directEntries, ...groupEntries]
     .filter((entry) => {
-      if (filter === "direct" && entry.type !== "direct") {
-        return false;
-      }
-      if (filter === "group" && entry.type !== "group") {
+      const matchesFilter = filter === "direct"
+        ? entry.type === "direct" && !entry.isArchived
+        : filter === "group"
+          ? entry.type === "group" && !entry.isArchived
+          : filter === "archived"
+            ? entry.isArchived
+            : !entry.isArchived;
+      if (!matchesFilter) {
         return false;
       }
       if (!normalizedQuery) {
@@ -641,6 +935,9 @@ export function getConversationEntries(userId, query = "", filter = "all") {
       return haystack.includes(normalizedQuery);
     })
     .sort((left, right) => {
+      if (left.isPinnedConversation !== right.isPinnedConversation) {
+        return left.isPinnedConversation ? -1 : 1;
+      }
       if (right.timestamp !== left.timestamp) {
         return right.timestamp - left.timestamp;
       }
@@ -653,6 +950,7 @@ export function getConversationDetails(userId, conversationId) {
   if (!state) {
     return null;
   }
+  const owner = findUser(state, userId);
   const parsed = parseConversationId(conversationId);
   if (parsed.type === "direct") {
     const target = findUser(state, parsed.targetId);
@@ -680,7 +978,9 @@ export function getConversationDetails(userId, conversationId) {
       lastSeenAt: canSeeLastSeen ? target.lastSeenAt : null,
       canSeeLastSeen,
       canSeeProfilePhoto,
-      presence
+      presence,
+      isArchived: Boolean(thread?.archivedBy.includes(userId)),
+      isPinnedConversation: Boolean(owner?.pinnedConversationIds.includes(conversationId))
     };
   }
   const thread = findThread(state, parsed.targetId);
@@ -703,7 +1003,9 @@ export function getConversationDetails(userId, conversationId) {
     lastSeenAt: null,
     canSeeLastSeen: false,
     canSeeProfilePhoto: false,
-    presence: "group"
+    presence: "group",
+    isArchived: thread.archivedBy.includes(userId),
+    isPinnedConversation: Boolean(owner?.pinnedConversationIds.includes(conversationId))
   };
 }
 
@@ -717,7 +1019,7 @@ export function getMessagesForConversation(userId, conversationId) {
     return [];
   }
   return state.messages
-    .filter((message) => message.threadId === thread.id)
+    .filter((message) => message.threadId === thread.id && isMessageVisibleForUser(thread, userId, message))
     .map((message) => ({
       ...message,
       sender: findUser(state, message.senderId),
@@ -749,7 +1051,7 @@ export function markAllDeliveredForUser(userId) {
   withState((state) => {
     state.messages.forEach((message) => {
       const thread = findThread(state, message.threadId);
-      if (!thread || !thread.memberIds.includes(userId) || message.senderId === userId) {
+      if (!thread || !thread.memberIds.includes(userId) || !isMessageVisibleForUser(thread, userId, message) || message.senderId === userId) {
         return;
       }
       if (message.receipts[userId] === "sent") {
@@ -767,7 +1069,7 @@ export function markConversationRead(userId, conversationId) {
       return;
     }
     state.messages.forEach((message) => {
-      if (message.threadId === thread.id && message.senderId !== userId) {
+      if (message.threadId === thread.id && isMessageVisibleForUser(thread, userId, message) && message.senderId !== userId) {
         message.receipts[userId] = "read";
       }
     });
@@ -781,9 +1083,47 @@ export function sendMessage(userId, conversationId, payload) {
     if (!thread) {
       return null;
     }
+    thread.archivedBy = thread.archivedBy.filter((memberId) => memberId !== userId);
+    const threadMap = new Map(state.threads.map((item) => [item.id, item]));
     const receipts = Object.fromEntries(thread.memberIds.map((memberId) => [memberId, memberId === userId ? "read" : "sent"]));
-    const message = normalizeMessage({ id: uid("m"), threadId: thread.id, senderId: userId, text: payload.text || "", createdAt: Date.now(), editedAt: null, replyTo: payload.replyTo || null, attachments: normalizeAttachments(payload.attachments), pinnedBy: payload.pinned ? [userId] : [], favoriteBy: payload.favorite ? [userId] : [], reactions: {}, receipts }, state.messages.length, new Map(state.threads.map((item) => [item.id, item])));
+    const message = normalizeMessage({
+      id: uid("m"),
+      threadId: thread.id,
+      senderId: userId,
+      text: payload.text || "",
+      createdAt: Date.now(),
+      editedAt: null,
+      replyTo: payload.replyTo || null,
+      attachments: normalizeAttachments(payload.attachments),
+      pinnedBy: payload.pinned ? [userId] : [],
+      favoriteBy: payload.favorite ? [userId] : [],
+      reactions: {},
+      receipts
+    }, state.messages.length, threadMap);
     state.messages.push(message);
+
+    const assistantId = thread.type === "direct" ? thread.memberIds.find((memberId) => memberId !== userId) : null;
+    const assistantUser = assistantId ? findUser(state, assistantId) : null;
+    if (isAssistantUser(assistantUser)) {
+      const assistantReceipts = { [assistantId]: "read", [userId]: "read" };
+      const assistantReply = normalizeMessage({
+        id: uid("m"),
+        threadId: thread.id,
+        senderId: assistantId,
+        text: buildAssistantReplyText(payload.text || ""),
+        createdAt: Date.now() + 1,
+        editedAt: null,
+        replyTo: message.id,
+        attachments: { images: [], docs: [], audio: [] },
+        pinnedBy: [],
+        favoriteBy: [],
+        reactions: {},
+        receipts: assistantReceipts
+      }, state.messages.length + 1, threadMap);
+      state.messages.push(assistantReply);
+      touchUser(state, assistantId);
+    }
+
     touchUser(state, userId);
     return message;
   });
@@ -801,14 +1141,56 @@ export function updateMessage(userId, messageId, nextText) {
   });
 }
 
-export function deleteMessage(userId, messageId) {
+export function deleteMessage(userId, messageId, mode = "everyone") {
   return withState((state) => {
     const index = state.messages.findIndex((item) => item.id === messageId);
-    if (index === -1 || state.messages[index].senderId !== userId) {
+    if (index === -1) {
+      return false;
+    }
+    const message = state.messages[index];
+    if (mode === "self") {
+      if (!message.hiddenFor.includes(userId)) {
+        message.hiddenFor.push(userId);
+      }
+      return true;
+    }
+    if (message.senderId !== userId) {
       return false;
     }
     state.messages.splice(index, 1);
     return true;
+  });
+}
+
+export function deleteMessages(userId, messageIds, mode = "self") {
+  return withState((state) => {
+    const ids = uniqueStrings(messageIds);
+    if (!ids.length) {
+      return false;
+    }
+    if (mode === "everyone") {
+      const removableIds = new Set(
+        state.messages
+          .filter((message) => ids.includes(message.id) && message.senderId === userId)
+          .map((message) => message.id)
+      );
+      if (!removableIds.size) {
+        return false;
+      }
+      state.messages = state.messages.filter((message) => !removableIds.has(message.id));
+      return true;
+    }
+    let changed = false;
+    state.messages.forEach((message) => {
+      if (!ids.includes(message.id)) {
+        return;
+      }
+      if (!message.hiddenFor.includes(userId)) {
+        message.hiddenFor.push(userId);
+        changed = true;
+      }
+    });
+    return changed;
   });
 }
 
@@ -866,6 +1248,80 @@ export function toggleFavorite(userId, messageId) {
     return true;
   });
 }
+
+export function setFavoriteMessages(userId, messageIds, favorite = true) {
+  return withState((state) => {
+    const ids = new Set(uniqueStrings(messageIds));
+    let changed = false;
+    state.messages.forEach((message) => {
+      if (!ids.has(message.id)) {
+        return;
+      }
+      const alreadyFavorite = message.favoriteBy.includes(userId);
+      if (favorite && !alreadyFavorite) {
+        message.favoriteBy.push(userId);
+        changed = true;
+      }
+      if (!favorite && alreadyFavorite) {
+        message.favoriteBy = message.favoriteBy.filter((value) => value !== userId);
+        changed = true;
+      }
+    });
+    return changed;
+  });
+}
+
+export function toggleConversationPinned(userId, conversationId) {
+  return withState((state) => {
+    const owner = findUser(state, userId);
+    if (!owner) {
+      return false;
+    }
+    const parsed = parseConversationId(conversationId);
+    const accessible = parsed.type === "group"
+      ? Boolean(resolveThreadFromConversation(state, userId, conversationId, false))
+      : Boolean(findUser(state, parsed.targetId));
+    if (!accessible) {
+      return false;
+    }
+    const wasPinned = owner.pinnedConversationIds.includes(conversationId);
+    owner.pinnedConversationIds = owner.pinnedConversationIds.filter((value) => value !== conversationId);
+    if (!wasPinned) {
+      owner.pinnedConversationIds.unshift(conversationId);
+    }
+    return !wasPinned;
+  });
+}
+
+export function toggleConversationArchived(userId, conversationId) {
+  return withState((state) => {
+    const thread = resolveThreadFromConversation(state, userId, conversationId, false);
+    if (!thread) {
+      return false;
+    }
+    if (thread.archivedBy.includes(userId)) {
+      thread.archivedBy = thread.archivedBy.filter((value) => value !== userId);
+      return false;
+    }
+    thread.archivedBy.push(userId);
+    return true;
+  });
+}
+
+export function clearConversationHistory(userId, conversationId) {
+  return withState((state) => {
+    const thread = resolveThreadFromConversation(state, userId, conversationId, false);
+    if (!thread) {
+      return false;
+    }
+    thread.clearedAtBy = {
+      ...(thread.clearedAtBy || {}),
+      [userId]: Date.now()
+    };
+    return true;
+  });
+}
+
 export function getPinnedMessagesForUser(userId) {
   const state = readState();
   if (!state) {
@@ -873,7 +1329,10 @@ export function getPinnedMessagesForUser(userId) {
   }
   const latestByThread = new Map();
   state.messages
-    .filter((message) => message.pinnedBy.includes(userId))
+    .filter((message) => {
+      const thread = findThread(state, message.threadId);
+      return thread && isMessageVisibleForUser(thread, userId, message) && message.pinnedBy.includes(userId);
+    })
     .sort((left, right) => right.createdAt - left.createdAt)
     .forEach((message) => {
       if (!latestByThread.has(message.threadId)) {
@@ -893,7 +1352,7 @@ export function getPinnedMessageForConversation(userId, conversationId) {
     return null;
   }
   const pinned = state.messages
-    .filter((message) => message.threadId === thread.id && message.pinnedBy.includes(userId))
+    .filter((message) => message.threadId === thread.id && isMessageVisibleForUser(thread, userId, message) && message.pinnedBy.includes(userId))
     .sort((left, right) => right.createdAt - left.createdAt)[0];
   return pinned ? { ...pinned, thread, sender: findUser(state, pinned.senderId) } : null;
 }
@@ -904,7 +1363,10 @@ export function getFavoriteMessagesForUser(userId) {
     return [];
   }
   return state.messages
-    .filter((message) => message.favoriteBy.includes(userId))
+    .filter((message) => {
+      const thread = findThread(state, message.threadId);
+      return thread && isMessageVisibleForUser(thread, userId, message) && message.favoriteBy.includes(userId);
+    })
     .map((message) => ({ ...message, thread: findThread(state, message.threadId), sender: findUser(state, message.senderId) }))
     .sort((left, right) => right.createdAt - left.createdAt);
 }
@@ -919,7 +1381,14 @@ export function searchMessagesForUser(userId, term) {
     return [];
   }
   const allowedThreadIds = new Set(state.threads.filter((thread) => thread.memberIds.includes(userId)).map((thread) => thread.id));
-  return state.messages.filter((message) => allowedThreadIds.has(message.threadId)).filter((message) => message.text.toLowerCase().includes(normalized)).map((message) => ({ ...message, thread: findThread(state, message.threadId), sender: findUser(state, message.senderId) })).sort((left, right) => right.createdAt - left.createdAt);
+  return state.messages
+    .filter((message) => {
+      const thread = findThread(state, message.threadId);
+      return thread && allowedThreadIds.has(message.threadId) && isMessageVisibleForUser(thread, userId, message);
+    })
+    .filter((message) => message.text.toLowerCase().includes(normalized))
+    .map((message) => ({ ...message, thread: findThread(state, message.threadId), sender: findUser(state, message.senderId) }))
+    .sort((left, right) => right.createdAt - left.createdAt);
 }
 
 export function updateContact(userId, targetUserId, patch) {
@@ -1086,12 +1555,57 @@ export function listUsersForPicker(userId, excludeIds = []) {
     return [];
   }
   const excluded = new Set([userId, ...excludeIds]);
-  return state.users.filter((user) => !excluded.has(user.id));
+  return state.users.filter((user) => !excluded.has(user.id) && !isAssistantUser(user));
+}
+
+export function searchUsersByUsername(userId, query = "") {
+  const state = readState();
+  if (!state) {
+    return [];
+  }
+  const owner = findUser(state, userId);
+  if (!owner) {
+    return [];
+  }
+  const normalized = sanitizeUsername(query);
+  if (!normalized) {
+    return [];
+  }
+  const existingContacts = new Set(owner.contactIds);
+  return state.users
+    .filter((user) => user.id !== userId && !isAssistantUser(user) && !existingContacts.has(user.id))
+    .filter((user) => user.username.includes(normalized))
+    .sort((left, right) => {
+      const leftStarts = left.username.startsWith(normalized) ? 0 : 1;
+      const rightStarts = right.username.startsWith(normalized) ? 0 : 1;
+      if (leftStarts !== rightStarts) {
+        return leftStarts - rightStarts;
+      }
+      return left.username.localeCompare(right.username);
+    });
+}
+
+export function addContact(userId, targetUserId) {
+  return withState((state) => {
+    const owner = findUser(state, userId);
+    const target = findUser(state, targetUserId);
+    if (!owner || !target) {
+      return { ok: false, error: "Contato nao encontrado" };
+    }
+    if (target.id === userId) {
+      return { ok: false, error: "Nao e possivel adicionar a propria conta" };
+    }
+    if (owner.contactIds.includes(target.id)) {
+      return { ok: false, error: "Esse contato ja foi adicionado" };
+    }
+    owner.contactIds = uniqueStrings([...owner.contactIds, target.id]);
+    return { ok: true, user: target };
+  });
 }
 
 export function exportState() {
   const state = readState();
-  return state || normalizeState({ version: 5, users: [], threads: [], messages: [], settings: {}, drafts: {} });
+  return state || normalizeState({ version: 8, users: [], threads: [], messages: [], settings: {}, drafts: {} });
 }
 
 export function importState(payload) {
