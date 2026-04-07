@@ -1,0 +1,38 @@
+[
+  {
+    "id": "ana",
+    "name": "Ana Costa",
+    "role": "Design lead",
+    "handle": "@ana",
+    "presence": "online",
+    "avatar": "AC",
+    "unread": 2
+  },
+  {
+    "id": "dev",
+    "name": "Dev Squad",
+    "role": "Engineering",
+    "handle": "@dev",
+    "presence": "away",
+    "avatar": "DV",
+    "unread": 1
+  },
+  {
+    "id": "sales",
+    "name": "Time Sales",
+    "role": "Commercial",
+    "handle": "@sales",
+    "presence": "offline",
+    "avatar": "SL",
+    "unread": 0
+  },
+  {
+    "id": "support",
+    "name": "Support",
+    "role": "Customer care",
+    "handle": "@support",
+    "presence": "online",
+    "avatar": "SP",
+    "unread": 0
+  }
+]

@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Atlas Chat - Login</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="page-auth">
+  <main class="auth-shell">
+    <section class="auth-hero">
+      <a class="brand brand-auth" href="index.html">
+        <span class="brand-mark">AT</span>
+        <span>
+          <strong>Atlas Chat</strong>
+          <small>Contas, grupos e mensagens privadas</small>
+        </span>
+      </a>
+
+      <div class="auth-copy">
+        <h1>Chat com login, contatos editaveis e grupos com admin.</h1>
+        <p>Fluxo local completo para testar contas diferentes, troca de mensagens, leitura e gestao de membros.</p>
+      </div>
+
+      <div class="auth-demo">
+        <div class="card-kicker">Contas demo</div>
+        <div class="demo-item"><strong>gustavo</strong><span>demo123</span></div>
+        <div class="demo-item"><strong>ana</strong><span>demo123</span></div>
+        <div class="demo-item"><strong>bruno</strong><span>demo123</span></div>
+        <div class="demo-item"><strong>clara</strong><span>demo123</span></div>
+      </div>
+    </section>
+
+    <section class="auth-panel">
+      <div class="auth-tabs">
+        <button id="login-tab" class="auth-tab active" type="button">Entrar</button>
+        <button id="register-tab" class="auth-tab" type="button">Cadastrar</button>
+      </div>
+
+      <form id="login-form" class="auth-form">
+        <label class="field">
+          <span>Usuario ou email</span>
+          <input id="login-identifier" type="text" placeholder="gustavo ou gustavo@atlas.local" required>
+        </label>
+        <label class="field">
+          <span>Senha</span>
+          <input id="login-password" type="password" placeholder="demo123" required>
+        </label>
+        <button class="primary-btn wide" type="submit">Entrar</button>
+      </form>
+
+      <form id="register-form" class="auth-form hidden">
+        <label class="field">
+          <span>Nome</span>
+          <input id="register-name" type="text" placeholder="Seu nome" required>
+        </label>
+        <label class="field">
+          <span>Usuario</span>
+          <input id="register-username" type="text" placeholder="seuusuario" required>
+        </label>
+        <label class="field">
+          <span>Email</span>
+          <input id="register-email" type="email" placeholder="voce@atlas.local" required>
+        </label>
+        <label class="field">
+          <span>Bio</span>
+          <input id="register-bio" type="text" placeholder="Ex.: Product designer">
+        </label>
+        <label class="field">
+          <span>Senha</span>
+          <input id="register-password" type="password" placeholder="Crie uma senha" required>
+        </label>
+        <button class="primary-btn wide" type="submit">Criar conta</button>
+      </form>
+
+      <p id="auth-feedback" class="auth-feedback"></p>
+    </section>
+  </main>
+
+  <script type="module" src="auth.js"></script>
+</body>
+</html>

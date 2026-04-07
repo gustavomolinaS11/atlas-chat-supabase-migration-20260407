@@ -1,0 +1,38 @@
+[
+  {
+    "id": "t-dm-gustavo-ana",
+    "type": "direct",
+    "title": "",
+    "memberIds": ["u-gustavo", "u-ana"],
+    "admins": ["u-gustavo"],
+    "createdBy": "u-gustavo"
+  },
+  {
+    "id": "t-dm-gustavo-bruno",
+    "type": "direct",
+    "title": "",
+    "memberIds": ["u-gustavo", "u-bruno"],
+    "admins": ["u-gustavo"],
+    "createdBy": "u-gustavo"
+  },
+  {
+    "id": "t-group-product",
+    "type": "group",
+    "title": "Product squad",
+    "avatar": "PS",
+    "description": "Launch room",
+    "memberIds": ["u-gustavo", "u-ana", "u-bruno"],
+    "admins": ["u-gustavo", "u-ana"],
+    "createdBy": "u-gustavo"
+  },
+  {
+    "id": "t-group-support",
+    "type": "group",
+    "title": "Support sync",
+    "avatar": "SS",
+    "description": "Tickets and customer notes",
+    "memberIds": ["u-gustavo", "u-clara"],
+    "admins": ["u-gustavo", "u-clara"],
+    "createdBy": "u-clara"
+  }
+]

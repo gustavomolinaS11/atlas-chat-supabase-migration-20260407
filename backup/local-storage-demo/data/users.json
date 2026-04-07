@@ -1,0 +1,38 @@
+[
+  {
+    "id": "u-gustavo",
+    "name": "Gustavo",
+    "username": "gustavo",
+    "email": "gustavo@atlas.local",
+    "password": "demo123",
+    "avatar": "GU",
+    "bio": "Owner"
+  },
+  {
+    "id": "u-ana",
+    "name": "Ana Costa",
+    "username": "ana",
+    "email": "ana@atlas.local",
+    "password": "demo123",
+    "avatar": "AN",
+    "bio": "Design lead"
+  },
+  {
+    "id": "u-bruno",
+    "name": "Bruno Dev",
+    "username": "bruno",
+    "email": "bruno@atlas.local",
+    "password": "demo123",
+    "avatar": "BD",
+    "bio": "Backend"
+  },
+  {
+    "id": "u-clara",
+    "name": "Clara Support",
+    "username": "clara",
+    "email": "clara@atlas.local",
+    "password": "demo123",
+    "avatar": "CS",
+    "bio": "Support"
+  }
+]

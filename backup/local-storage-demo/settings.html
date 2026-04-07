@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Atlas Chat - Configuracoes</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="page-settings">
+  <div class="settings-shell">
+    <aside class="settings-sidebar">
+      <a class="brand" href="chat.html">
+        <span class="brand-mark">AT</span>
+        <span>
+          <strong>Atlas Chat</strong>
+          <small>Configuracoes</small>
+        </span>
+      </a>
+
+      <div class="settings-profile">
+        <div id="settings-avatar" class="current-user-avatar">ME</div>
+        <div>
+          <strong id="settings-name">Conta</strong>
+          <div id="settings-handle" class="muted-line">@user</div>
+        </div>
+      </div>
+
+      <nav class="settings-nav">
+        <a class="settings-nav-link" href="#section-profile">Perfil</a>
+        <a class="settings-nav-link" href="#section-appearance">Aparencia</a>
+        <a class="settings-nav-link" href="#section-conversations">Conversas</a>
+        <a class="settings-nav-link" href="#section-privacy">Privacidade</a>
+        <a class="settings-nav-link" href="#section-search">Busca</a>
+        <a class="settings-nav-link" href="#section-library">Favoritas e pins</a>
+        <a class="settings-nav-link" href="#section-data">Dados</a>
+        <a class="settings-nav-link" href="#section-features">Recursos</a>
+      </nav>
+
+      <a class="primary-btn wide" href="chat.html">Voltar ao chat</a>
+    </aside>
+
+    <main class="settings-main">
+      <header class="settings-head">
+        <div>
+          <div class="card-kicker">Painel</div>
+          <h1>Preferencias e dados</h1>
+        </div>
+      </header>
+
+      <div class="settings-stack">
+        <section id="section-profile" class="settings-section">
+          <div class="settings-section-head">
+            <div class="card-kicker">Perfil</div>
+            <h2>Foto e dados da conta</h2>
+          </div>
+          <div class="settings-card">
+            <div class="profile-editor">
+              <div id="profile-photo-preview" class="profile-photo-frame">ME</div>
+              <div class="profile-editor-main">
+                <div class="profile-photo-actions">
+                  <label class="ghost-btn file-field" role="button" tabindex="0">
+                    <span>Trocar foto</span>
+                    <input id="profile-photo-input" type="file" accept="image/*" hidden>
+                  </label>
+                  <button id="profile-photo-remove" class="ghost-btn" type="button">Remover foto</button>
+                </div>
+                <div class="profile-editor-fields">
+                  <label class="field">
+                    <span>Nome</span>
+                    <input id="profile-name-input" type="text" placeholder="Seu nome">
+                  </label>
+                  <label class="field">
+                    <span>Bio</span>
+                    <input id="profile-bio-input" type="text" placeholder="Como voce quer aparecer">
+                  </label>
+                </div>
+                <button id="profile-save-btn" class="primary-btn" type="button">Salvar perfil</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="section-appearance" class="settings-section">
+          <div class="settings-section-head">
+            <div class="card-kicker">Aparencia</div>
+            <h2>Tema e layout</h2>
+          </div>
+          <div class="settings-grid">
+            <section class="settings-card">
+              <div class="card-kicker">Tema</div>
+              <h3>Cores e intensidade</h3>
+              <div id="theme-palette" class="palette-grid"></div>
+              <label class="field">
+                <span>Saturacao</span>
+                <input id="saturation-range" type="range" min="0.6" max="1.4" step="0.05" value="1">
+              </label>
+              <button id="mode-toggle" class="icon-btn theme-toggle" type="button" aria-label="Alternar tema" title="Alternar tema"></button>
+            </section>
+
+            <section class="settings-card">
+              <div class="card-kicker">Leitura</div>
+              <h3>Escala e fundo</h3>
+              <label class="field">
+                <span>Tamanho do texto</span>
+                <select id="font-scale-select">
+                  <option value="sm">Compacto</option>
+                  <option value="md">Padrao</option>
+                  <option value="lg">Confortavel</option>
+                </select>
+              </label>
+              <label class="toggle-row">
+                <div>
+                  <strong>Fundo com brilho</strong>
+                  <span class="muted-line">Mantem o glow no background do app.</span>
+                </div>
+                <input id="wallpaper-glow-toggle" type="checkbox">
+              </label>
+              <label class="toggle-row">
+                <div>
+                  <strong>Bolhas largas</strong>
+                  <span class="muted-line">Aproveita mais a largura da conversa.</span>
+                </div>
+                <input id="wide-bubbles-toggle" type="checkbox">
+              </label>
+            </section>
+          </div>
+        </section>
+
+        <section id="section-conversations" class="settings-section">
+          <div class="settings-section-head">
+            <div class="card-kicker">Conversas</div>
+            <h2>Comportamento da interface</h2>
+          </div>
+          <div class="settings-grid">
+            <section class="settings-card">
+              <div class="card-kicker">Interface</div>
+              <h3>Organizacao visual</h3>
+              <label class="toggle-row">
+                <div>
+                  <strong>Modo compacto</strong>
+                  <span class="muted-line">Reduz espacamento geral do app.</span>
+                </div>
+                <input id="compact-mode-toggle" type="checkbox">
+              </label>
+              <label class="toggle-row">
+                <div>
+                  <strong>Mostrar avatares</strong>
+                  <span class="muted-line">Exibe fotos e iniciais nas listas e chats.</span>
+                </div>
+                <input id="show-avatars-toggle" type="checkbox">
+              </label>
+              <label class="toggle-row">
+                <div>
+                  <strong>Preview na sidebar</strong>
+                  <span class="muted-line">Mostra ultima mensagem na lista de conversas.</span>
+                </div>
+                <input id="show-sidebar-preview-toggle" type="checkbox">
+              </label>
+            </section>
+
+            <section class="settings-card">
+              <div class="card-kicker">Mensagens</div>
+              <h3>Escrita e leitura</h3>
+              <label class="toggle-row">
+                <div>
+                  <strong>Enter envia</strong>
+                  <span class="muted-line">Desative para usar Enter como quebra de linha.</span>
+                </div>
+                <input id="enter-to-send-toggle" type="checkbox">
+              </label>
+              <label class="toggle-row">
+                <div>
+                  <strong>Mostrar horario</strong>
+                  <span class="muted-line">Exibe hora nas mensagens e lista de chats.</span>
+                </div>
+                <input id="show-message-time-toggle" type="checkbox">
+              </label>
+              <label class="toggle-row">
+                <div>
+                  <strong>Indicador digitando</strong>
+                  <span class="muted-line">Mostra feedback enquanto voce escreve.</span>
+                </div>
+                <input id="show-typing-indicator-toggle" type="checkbox">
+              </label>
+              <label class="toggle-row">
+                <div>
+                  <strong>Barra de reacoes</strong>
+                  <span class="muted-line">Exibe botoes rapidos abaixo da mensagem.</span>
+                </div>
+                <input id="show-reaction-bar-toggle" type="checkbox">
+              </label>
+              <label class="toggle-row">
+                <div>
+                  <strong>Blur em imagens</strong>
+                  <span class="muted-line">Esconde a previa das imagens ate passar o mouse.</span>
+                </div>
+                <input id="blur-media-toggle" type="checkbox">
+              </label>
+            </section>
+          </div>
+        </section>
+
+        <section id="section-privacy" class="settings-section">
+          <div class="settings-section-head">
+            <div class="card-kicker">Privacidade</div>
+            <h2>Visibilidade da conta</h2>
+          </div>
+          <div class="settings-grid">
+            <section class="settings-card">
+              <div class="card-kicker">Presenca</div>
+              <h3>Status e leitura</h3>
+              <label class="field">
+                <span>Ultima vez online</span>
+                <select id="privacy-last-seen">
+                  <option value="everyone">Mostrar</option>
+                  <option value="nobody">Ocultar</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Confirmacao de leitura</span>
+                <select id="privacy-read-receipts">
+                  <option value="everyone">Mostrar</option>
+                  <option value="nobody">Ocultar</option>
+                </select>
+              </label>
+            </section>
+
+            <section class="settings-card">
+              <div class="card-kicker">Perfil</div>
+              <h3>Exibicao publica</h3>
+              <label class="field">
+                <span>Foto de perfil</span>
+                <select id="privacy-profile-photo">
+                  <option value="everyone">Mostrar</option>
+                  <option value="nobody">Ocultar</option>
+                </select>
+              </label>
+            </section>
+          </div>
+        </section>
+
+        <section id="section-search" class="settings-section">
+          <div class="settings-section-head">
+            <div class="card-kicker">Busca</div>
+            <h2>Mensagens e historico</h2>
+          </div>
+          <div class="settings-card">
+            <input id="global-search" type="search" placeholder="Buscar em todas as conversas">
+            <div id="global-search-results" class="search-results"></div>
+          </div>
+        </section>
+
+        <section id="section-library" class="settings-section">
+          <div class="settings-section-head">
+            <div class="card-kicker">Biblioteca</div>
+            <h2>Favoritas e fixadas</h2>
+          </div>
+          <div class="settings-grid">
+            <section class="settings-card">
+              <div class="card-kicker">Favoritas</div>
+              <h3>Mensagens com estrela</h3>
+              <div id="favorite-list" class="pin-list"></div>
+            </section>
+
+            <section class="settings-card">
+              <div class="card-kicker">Pins</div>
+              <h3>Fixadas por conversa</h3>
+              <div id="pin-list" class="pin-list"></div>
+            </section>
+          </div>
+        </section>
+
+        <section id="section-data" class="settings-section">
+          <div class="settings-section-head">
+            <div class="card-kicker">Dados</div>
+            <h2>Backup local</h2>
+          </div>
+          <div class="settings-grid">
+            <section class="settings-card">
+              <div class="card-kicker">Estado</div>
+              <h3>Import e export</h3>
+              <button id="export-btn" class="ghost-btn" type="button">Exportar JSON</button>
+              <label class="ghost-btn file-field" role="button" tabindex="0">
+                <span>Importar JSON</span>
+                <input id="import-input" type="file" accept="application/json" hidden>
+              </label>
+              <button id="reset-btn" class="ghost-btn danger" type="button">Reset local</button>
+            </section>
+          </div>
+        </section>
+
+        <section id="section-features" class="settings-section">
+          <div class="settings-section-head">
+            <div class="card-kicker">Recursos</div>
+            <h2>Ativos neste build</h2>
+          </div>
+          <div class="settings-card">
+            <div id="feature-list" class="feature-grid"></div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <script type="module" src="settings.js"></script>
+</body>
+</html>

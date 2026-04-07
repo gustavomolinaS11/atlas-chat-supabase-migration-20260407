@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Atlas Chat</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="page-chat">
+  <div class="chat-app">
+    <aside class="sidebar">
+      <div class="sidebar-top">
+        <a class="brand" href="chat.html">
+          <span class="brand-mark">AT</span>
+          <span>
+            <strong>Atlas Chat</strong>
+            <small>Workspace local</small>
+          </span>
+        </a>
+        <div class="sidebar-head-actions">
+          <button id="new-group-btn" class="icon-btn" type="button" title="Novo grupo"></button>
+          <a class="icon-link" href="settings.html" title="Configuracoes"></a>
+          <button id="logout-btn" class="icon-btn" type="button" title="Sair"></button>
+        </div>
+      </div>
+
+      <section class="current-user-card">
+        <div id="session-avatar" class="current-user-avatar">ME</div>
+        <div class="current-user-meta">
+          <strong id="session-name">Conta</strong>
+          <span id="session-handle">@user</span>
+        </div>
+      </section>
+
+      <label class="search-field">
+        <span>Buscar conversa</span>
+        <input id="thread-search" type="search" placeholder="Nome, grupo ou bio">
+      </label>
+
+      <div class="filter-row">
+        <button class="filter-chip active" data-filter="all" type="button">Todas</button>
+        <button class="filter-chip" data-filter="direct" type="button">Pessoas</button>
+        <button class="filter-chip" data-filter="group" type="button">Grupos</button>
+      </div>
+
+      <div id="thread-list" class="thread-list"></div>
+    </aside>
+
+    <main class="chat-shell">
+      <header class="chat-header">
+        <div class="chat-identity">
+          <div id="chat-avatar" class="chat-avatar">AT</div>
+          <div>
+            <div id="chat-title" class="chat-title">Selecione uma conversa</div>
+            <div id="chat-subtitle" class="chat-subtitle">Chat privado ou grupo</div>
+          </div>
+        </div>
+        <div class="chat-actions">
+          <button id="conversation-search-btn" class="icon-btn" type="button" title="Buscar na conversa"></button>
+          <button id="details-btn" class="icon-btn" type="button" title="Detalhes"></button>
+        </div>
+      </header>
+
+      <section id="pinned-banner" class="pinned-banner hidden"></section>
+
+      <section id="conversation-search-panel" class="search-panel hidden">
+        <div class="search-row">
+          <input id="conversation-search-input" type="search" placeholder="Buscar nesta conversa">
+          <button id="conversation-search-close" class="ghost-btn compact" type="button">Fechar</button>
+        </div>
+        <div id="conversation-search-results" class="search-results"></div>
+      </section>
+
+      <section id="messages" class="message-feed"></section>
+
+      <section id="reply-banner" class="reply-banner hidden">
+        <div>
+          <strong>Respondendo</strong>
+          <span id="reply-text"></span>
+        </div>
+        <button id="reply-cancel" class="ghost-btn compact" type="button">Cancelar</button>
+      </section>
+
+      <form id="composer-form" class="composer">
+        <div id="attachment-preview" class="attachment-preview hidden"></div>
+        <div class="composer-row">
+          <div class="composer-tools">
+            <button id="emoji-btn" class="icon-btn" type="button" title="Emoji"></button>
+            <button id="image-btn" class="icon-btn" type="button" title="Imagem"></button>
+            <button id="file-btn" class="icon-btn" type="button" title="Documento"></button>
+            <button id="voice-btn" class="icon-btn" type="button" title="Audio"></button>
+          </div>
+          <textarea id="composer" rows="1" placeholder="Digite uma mensagem"></textarea>
+          <button id="send-btn" class="send-btn" type="submit" title="Enviar"></button>
+        </div>
+        <div class="composer-meta">
+          <span id="draft-status">Draft salvo</span>
+          <span id="typing-indicator" class="typing hidden">digitando...</span>
+        </div>
+      </form>
+    </main>
+
+    <aside id="details-drawer" class="details-drawer hidden">
+      <div class="drawer-head">
+        <div>
+          <div class="card-kicker">Detalhes</div>
+          <h2 id="drawer-title">Conversa</h2>
+        </div>
+        <button id="drawer-close" class="icon-btn" type="button" title="Fechar"></button>
+      </div>
+      <div id="drawer-body" class="drawer-body"></div>
+    </aside>
+  </div>
+
+  <input id="image-input" type="file" accept="image/*" hidden>
+  <input id="doc-input" type="file" accept=".pdf,.doc,.docx,.txt,.xls,.xlsx" hidden>
+
+  <div id="emoji-panel" class="floating-panel hidden"></div>
+
+  <div id="modal-layer" class="modal-layer hidden">
+    <div class="modal-card">
+      <div class="modal-head">
+        <div>
+          <div class="card-kicker" id="modal-kicker">Editor</div>
+          <h2 id="modal-title">Ajustes</h2>
+        </div>
+        <button id="modal-close" class="icon-btn" type="button" title="Fechar"></button>
+      </div>
+      <div id="modal-body" class="modal-body"></div>
+    </div>
+  </div>
+
+  <div id="lightbox" class="lightbox hidden">
+    <button id="lightbox-close" class="lightbox-close" type="button">Fechar</button>
+    <img id="lightbox-img" alt="preview">
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

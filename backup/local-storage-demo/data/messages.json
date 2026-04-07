@@ -1,0 +1,58 @@
+[
+  {
+    "id": "m-1",
+    "threadId": "t-dm-gustavo-ana",
+    "senderId": "u-ana",
+    "text": "Revisei a home. Posso subir o pack final agora.",
+    "attachments": { "images": [], "docs": [], "audio": [] },
+    "pinnedBy": ["u-gustavo"],
+    "favoriteBy": [],
+    "reactions": { "love": ["u-gustavo"] },
+    "receipts": { "u-ana": "read", "u-gustavo": "read" }
+  },
+  {
+    "id": "m-2",
+    "threadId": "t-dm-gustavo-ana",
+    "senderId": "u-gustavo",
+    "text": "Manda tambem a versao mobile e o grid final.",
+    "replyTo": "m-1",
+    "attachments": { "images": [], "docs": [], "audio": [] },
+    "pinnedBy": [],
+    "favoriteBy": ["u-gustavo"],
+    "reactions": {},
+    "receipts": { "u-ana": "read", "u-gustavo": "read" }
+  },
+  {
+    "id": "m-3",
+    "threadId": "t-dm-gustavo-bruno",
+    "senderId": "u-bruno",
+    "text": "Deploy concluido. Fila e logs normais.",
+    "attachments": { "images": [], "docs": [], "audio": [] },
+    "pinnedBy": ["u-gustavo"],
+    "favoriteBy": [],
+    "reactions": { "fire": ["u-gustavo"] },
+    "receipts": { "u-bruno": "read", "u-gustavo": "delivered" }
+  },
+  {
+    "id": "m-4",
+    "threadId": "t-group-product",
+    "senderId": "u-gustavo",
+    "text": "Fechar backlog hoje. Cada um manda status antes das 18h.",
+    "attachments": { "images": [], "docs": [], "audio": [] },
+    "pinnedBy": ["u-gustavo", "u-ana"],
+    "favoriteBy": [],
+    "reactions": { "like": ["u-ana", "u-bruno"] },
+    "receipts": { "u-gustavo": "read", "u-ana": "read", "u-bruno": "delivered" }
+  },
+  {
+    "id": "m-5",
+    "threadId": "t-group-support",
+    "senderId": "u-clara",
+    "text": "Ticket 4821 fechado. Cliente pediu follow up em 7 dias.",
+    "attachments": { "images": [], "docs": [], "audio": [] },
+    "pinnedBy": [],
+    "favoriteBy": [],
+    "reactions": {},
+    "receipts": { "u-clara": "read", "u-gustavo": "sent" }
+  }
+]
