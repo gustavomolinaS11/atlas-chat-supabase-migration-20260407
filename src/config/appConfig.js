@@ -18,6 +18,7 @@ export const APP_CONFIG = {
       accentAlt: '#45e0b1',
       saturation: 1,
       fontScale: 'md',
+      bubbleSize: 'sm',
       compactMode: false,
       showAvatars: true,
       showMessageTime: true,

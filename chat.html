@@ -30,14 +30,20 @@
         <div class="sidebar-head-actions">
           <div class="quick-create-wrap">
             <button id="quick-create-btn" class="icon-btn" type="button" title="Criar"></button>
-            <div id="quick-create-menu" class="context-menu hidden">
-              <button class="context-menu-item" data-quick-action="add-contact" type="button">
-                <span class="context-menu-icon">+</span>
-                <span>Adicionar contato</span>
+            <div id="quick-create-menu" class="context-menu quick-create-menu hidden">
+              <button class="context-menu-item quick-create-item" data-quick-action="add-contact" type="button">
+                <span id="quick-create-add-icon" class="context-menu-icon quick-create-item-icon"></span>
+                <span class="quick-create-copy">
+                  <strong>Adicionar contato</strong>
+                  <small>Iniciar conversa privada</small>
+                </span>
               </button>
-              <button class="context-menu-item" data-quick-action="create-group" type="button">
-                <span class="context-menu-icon">+</span>
-                <span>Criar grupo</span>
+              <button class="context-menu-item quick-create-item" data-quick-action="create-group" type="button">
+                <span id="quick-create-group-icon" class="context-menu-icon quick-create-item-icon"></span>
+                <span class="quick-create-copy">
+                  <strong>Criar grupo</strong>
+                  <small>Reunir varias pessoas</small>
+                </span>
               </button>
             </div>
           </div>
@@ -64,6 +70,7 @@
     <main class="chat-shell">
       <header class="chat-header">
         <div class="chat-identity">
+          <button id="mobile-chat-back-btn" class="icon-btn mobile-chat-back-btn" type="button" title="Voltar"></button>
           <div id="chat-avatar" class="chat-avatar">AT</div>
           <div>
             <div id="chat-title" class="chat-title">Selecione uma conversa</div>
@@ -116,6 +123,7 @@
 
       <form id="composer-form" class="composer">
         <div id="attachment-preview" class="attachment-preview hidden"></div>
+        <div id="mention-panel" class="mention-panel hidden"></div>
         <div class="composer-row">
           <div class="composer-tools">
             <button id="emoji-btn" class="icon-btn" type="button" title="Emoji"></button>

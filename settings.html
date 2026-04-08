@@ -43,6 +43,13 @@
     </aside>
 
     <main class="settings-main">
+      <div class="settings-mobile-bar">
+        <a class="icon-link settings-mobile-back" href="chat.html" title="Voltar"></a>
+        <div class="settings-mobile-copy">
+          <strong>Configuracoes</strong>
+          <span class="muted-line">Conta, privacidade e conversas</span>
+        </div>
+      </div>
       <header class="settings-head">
         <div>
           <div class="card-kicker">Painel</div>
@@ -118,12 +125,15 @@
                 </div>
                 <input id="wallpaper-glow-toggle" type="checkbox">
               </label>
-              <label class="toggle-row">
-                <div>
-                  <strong>Bolhas largas</strong>
-                  <span class="muted-line">Aproveita mais a largura da conversa.</span>
-                </div>
-                <input id="wide-bubbles-toggle" type="checkbox">
+              <label class="field">
+                <span>Tamanho dos baloes</span>
+                <select id="bubble-size-select">
+                  <option value="xs">Muito pequeno</option>
+                  <option value="sm">Pequeno</option>
+                  <option value="md">Medio</option>
+                  <option value="lg">Grande</option>
+                  <option value="xl">Muito grande</option>
+                </select>
               </label>
             </section>
           </div>

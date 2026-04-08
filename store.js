@@ -11,6 +11,7 @@ const DEFAULT_SETTINGS = {
   accentAlt: "#45e0b1",
   saturation: 1,
   fontScale: "md",
+  bubbleSize: "sm",
   compactMode: false,
   showAvatars: true,
   showMessageTime: true,
@@ -145,10 +146,14 @@ function normalizeBoolean(value, fallback) {
 function normalizeSettingsRecord(value) {
   const source = value && typeof value === "object" ? value : {};
   const fontScale = ["sm", "md", "lg"].includes(source.fontScale) ? source.fontScale : DEFAULT_SETTINGS.fontScale;
+  const bubbleSize = ["xs", "sm", "md", "lg", "xl"].includes(source.bubbleSize)
+    ? source.bubbleSize
+    : (normalizeBoolean(source.wideBubbles, false) ? "lg" : DEFAULT_SETTINGS.bubbleSize);
   return {
     ...DEFAULT_SETTINGS,
     ...source,
     fontScale,
+    bubbleSize,
     compactMode: normalizeBoolean(source.compactMode, DEFAULT_SETTINGS.compactMode),
     showAvatars: normalizeBoolean(source.showAvatars, DEFAULT_SETTINGS.showAvatars),
     showMessageTime: normalizeBoolean(source.showMessageTime, DEFAULT_SETTINGS.showMessageTime),
@@ -236,9 +241,26 @@ function normalizeMessage(message, index, threadMap) {
     pinnedBy: uniqueStrings(message.pinnedBy),
     favoriteBy: uniqueStrings(message.favoriteBy),
     hiddenFor: uniqueStrings(message.hiddenFor),
+    mentions: uniqueStrings(message.mentions).filter((userId) => members.includes(userId)),
     reactions: Object.fromEntries(Object.entries(reactions).map(([token, userIds]) => [token, uniqueStrings(userIds)])),
     receipts
   };
+}
+
+function extractMentionedUserIds(state, thread, senderId, text) {
+  if (!thread || !String(text || "").includes("@")) {
+    return [];
+  }
+  const usernames = new Set();
+  for (const match of String(text || "").matchAll(/@([a-z0-9._-]{3,})/gi)) {
+    usernames.add(sanitizeUsername(match[1]));
+  }
+  if (!usernames.size) {
+    return [];
+  }
+  return state.users
+    .filter((user) => usernames.has(sanitizeUsername(user.username)) && thread.memberIds.includes(user.id) && user.id !== senderId)
+    .map((user) => user.id);
 }
 
 function normalizeState(input) {
@@ -553,6 +575,21 @@ function getUnreadCountForThread(state, userId, threadId) {
   return state.messages.filter((message) => message.threadId === threadId && isMessageVisibleForUser(thread, userId, message) && message.senderId !== userId && message.receipts[userId] !== "read").length;
 }
 
+function getUnreadMentionCountForThread(state, userId, threadId) {
+  const thread = findThread(state, threadId);
+  if (!thread) {
+    return 0;
+  }
+  return state.messages.filter((message) =>
+    message.threadId === threadId
+    && isMessageVisibleForUser(thread, userId, message)
+    && message.senderId !== userId
+    && message.receipts[userId] !== "read"
+    && Array.isArray(message.mentions)
+    && message.mentions.includes(userId)
+  ).length;
+}
+
 function getLastMessageForThread(state, threadId, userId = null) {
   const thread = findThread(state, threadId);
   if (!thread) {
@@ -567,6 +604,7 @@ function buildDirectEntry(state, userId, otherUser) {
   const thread = getDirectThreadBetween(state, userId, otherUser.id);
   const conversationId = buildConversationId("direct", otherUser.id);
   const lastMessage = thread ? getLastMessageForThread(state, thread.id, userId) : null;
+  const unreadMentionCount = thread ? getUnreadMentionCountForThread(state, userId, thread.id) : 0;
   const edit = getContactEdit(state, userId, otherUser.id);
   const canSeeProfilePhoto = canViewerSeePrivacy(state, userId, otherUser.id, "profilePhoto");
   const canSeeLastSeen = canViewerSeePrivacy(state, userId, otherUser.id, "lastSeen");
@@ -586,6 +624,8 @@ function buildDirectEntry(state, userId, otherUser) {
     lastSeenAt: canSeeLastSeen ? otherUser.lastSeenAt : null,
     lastMessage,
     unreadCount: thread ? getUnreadCountForThread(state, userId, thread.id) : 0,
+    mentionCount: unreadMentionCount,
+    hasUnreadMention: unreadMentionCount > 0,
     timestamp: lastMessage?.createdAt || thread?.createdAt || 0,
     isArchived: Boolean(thread?.archivedBy.includes(userId)),
     isPinnedConversation: Boolean(owner?.pinnedConversationIds.includes(conversationId))
@@ -596,6 +636,7 @@ function buildGroupEntry(state, userId, thread) {
   const owner = findUser(state, userId);
   const conversationId = buildConversationId("group", thread.id);
   const lastMessage = getLastMessageForThread(state, thread.id, userId);
+  const unreadMentionCount = getUnreadMentionCountForThread(state, userId, thread.id);
   return {
     id: conversationId,
     type: "group",
@@ -611,6 +652,8 @@ function buildGroupEntry(state, userId, thread) {
     lastSeenAt: null,
     lastMessage,
     unreadCount: getUnreadCountForThread(state, userId, thread.id),
+    mentionCount: unreadMentionCount,
+    hasUnreadMention: unreadMentionCount > 0,
     timestamp: lastMessage?.createdAt || thread.createdAt,
     isArchived: thread.archivedBy.includes(userId),
     isPinnedConversation: Boolean(owner?.pinnedConversationIds.includes(conversationId))
@@ -860,13 +903,52 @@ export function applyDisplayPreferences(settings) {
   const theme = normalizeSettingsRecord(settings);
   const root = document.documentElement.style;
   const scaleMap = { sm: "0.95", md: "1", lg: "1.06" };
+  const bubbleWidthMap = {
+    xs: "min(520px, 66%)",
+    sm: "min(620px, 72%)",
+    md: "min(760px, 78%)",
+    lg: "min(900px, 82%)",
+    xl: "min(1040px, 86%)"
+  };
+  const bubbleMinWidthMap = {
+    xs: "220px",
+    sm: "280px",
+    md: "340px",
+    lg: "420px",
+    xl: "500px"
+  };
+  const bubbleImageWidthMap = {
+    xs: "240px",
+    sm: "280px",
+    md: "320px",
+    lg: "360px",
+    xl: "420px"
+  };
+  const bubbleImageHeightMap = {
+    xs: "172px",
+    sm: "200px",
+    md: "228px",
+    lg: "258px",
+    xl: "300px"
+  };
+  const audioCardWidthMap = {
+    xs: "240px",
+    sm: "280px",
+    md: "330px",
+    lg: "380px",
+    xl: "440px"
+  };
   root.setProperty("--font-scale", scaleMap[theme.fontScale] || "1");
-  root.setProperty("--message-bubble-width", theme.wideBubbles ? "min(1280px, 100%)" : "min(1100px, 94%)");
+  root.setProperty("--message-bubble-width", bubbleWidthMap[theme.bubbleSize] || bubbleWidthMap.sm);
+  root.setProperty("--message-bubble-min-width", bubbleMinWidthMap[theme.bubbleSize] || bubbleMinWidthMap.sm);
+  root.setProperty("--message-image-width", bubbleImageWidthMap[theme.bubbleSize] || bubbleImageWidthMap.sm);
+  root.setProperty("--message-image-height", bubbleImageHeightMap[theme.bubbleSize] || bubbleImageHeightMap.sm);
+  root.setProperty("--audio-card-width", audioCardWidthMap[theme.bubbleSize] || audioCardWidthMap.sm);
 
   document.body.classList.toggle("compact-ui", theme.compactMode);
   document.body.classList.toggle("hide-avatars", !theme.showAvatars);
   document.body.classList.toggle("blur-media", theme.blurMedia);
-  document.body.classList.toggle("wide-bubbles", theme.wideBubbles);
+  document.body.classList.toggle("wide-bubbles", ["lg", "xl"].includes(theme.bubbleSize));
   document.body.classList.toggle("no-wallpaper-glow", !theme.wallpaperGlow);
 
   if (!theme.wallpaperGlow) {
@@ -935,6 +1017,9 @@ export function getConversationEntries(userId, query = "", filter = "all") {
       return haystack.includes(normalizedQuery);
     })
     .sort((left, right) => {
+      if (left.hasUnreadMention !== right.hasUnreadMention) {
+        return left.hasUnreadMention ? -1 : 1;
+      }
       if (left.isPinnedConversation !== right.isPinnedConversation) {
         return left.isPinnedConversation ? -1 : 1;
       }
@@ -1026,6 +1111,7 @@ export function getMessagesForConversation(userId, conversationId) {
       thread,
       isPinned: message.pinnedBy.includes(userId),
       isFavorite: message.favoriteBy.includes(userId),
+      mentionsCurrentUser: Array.isArray(message.mentions) && message.mentions.includes(userId),
       senderStatus: getSenderStatus(state, message, thread, userId)
     }));
 }
@@ -1083,8 +1169,9 @@ export function sendMessage(userId, conversationId, payload) {
     if (!thread) {
       return null;
     }
-    thread.archivedBy = thread.archivedBy.filter((memberId) => memberId !== userId);
     const threadMap = new Map(state.threads.map((item) => [item.id, item]));
+    const mentions = extractMentionedUserIds(state, thread, userId, payload.text || "");
+    thread.archivedBy = thread.archivedBy.filter((memberId) => memberId !== userId && !mentions.includes(memberId));
     const receipts = Object.fromEntries(thread.memberIds.map((memberId) => [memberId, memberId === userId ? "read" : "sent"]));
     const message = normalizeMessage({
       id: uid("m"),
@@ -1097,6 +1184,7 @@ export function sendMessage(userId, conversationId, payload) {
       attachments: normalizeAttachments(payload.attachments),
       pinnedBy: payload.pinned ? [userId] : [],
       favoriteBy: payload.favorite ? [userId] : [],
+      mentions,
       reactions: {},
       receipts
     }, state.messages.length, threadMap);
@@ -1135,7 +1223,9 @@ export function updateMessage(userId, messageId, nextText) {
     if (!message || message.senderId !== userId) {
       return false;
     }
+    const thread = findThread(state, message.threadId);
     message.text = String(nextText || "").trim();
+    message.mentions = extractMentionedUserIds(state, thread, userId, message.text);
     message.editedAt = Date.now();
     return true;
   });

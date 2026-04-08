@@ -14,6 +14,7 @@
   formatRelative,
   getConversationDetails,
   getConversationEntries,
+  getConversationIdForDirect,
   getCurrentUser,
   getDraft,
   getGroupMembers,
@@ -54,6 +55,7 @@ const REACTIONS = [
 const AUDIO_SPEEDS = [1, 1.5, 2];
 
 const ICONS = {
+  arrowLeft: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/><path d="M9 12h10"/></svg>',
   plus: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>',
   gear: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.5A3.5 3.5 0 1 1 8.5 12 3.5 3.5 0 0 1 12 8.5Zm0-6 1.1 2.6 2.8.5-.8 2.7 1.9 2-1.9 2 .8 2.7-2.8.5L12 21.5l-1.1-2.6-2.8-.5.8-2.7-1.9-2 1.9-2-.8-2.7 2.8-.5Z"/></svg>',
   logout: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 17v2H5V5h5v2M14 7l5 5-5 5M19 12H9"/></svg>',
@@ -64,6 +66,7 @@ const ICONS = {
   image: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16v12H4zM8 10h.01M20 16l-5-5-4 4-2-2-5 5"/></svg>',
   camera: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7.5 8.8 5h6.4L17 7.5h2A2 2 0 0 1 21 9.5v8A2 2 0 0 1 19 19.5H5a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2Zm5 2.5a4 4 0 1 0 4 4 4 4 0 0 0-4-4Z"/></svg>',
   file: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3h6l5 5v13H8zM14 3v5h5"/></svg>',
+  users: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 11a3 3 0 1 0-3-3 3 3 0 0 0 3 3Zm8 1.5a2.5 2.5 0 1 0-2.5-2.5 2.5 2.5 0 0 0 2.5 2.5ZM3.5 20a5.5 5.5 0 0 1 11 0M14 20a4 4 0 0 1 7 0"/></svg>',
   mic: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15a3 3 0 0 0 3-3V7a3 3 0 0 0-6 0v5a3 3 0 0 0 3 3Zm0 0v4m-4-6a4 4 0 0 0 8 0"/></svg>',
   play: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 6 10 6-10 6Z" fill="currentColor" stroke="none"/></svg>',
   pause: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6v12M15 6v12"/></svg>',
@@ -98,6 +101,7 @@ const elements = {
   sessionHandle: document.getElementById("session-handle"),
   threadSearch: document.getElementById("thread-search"),
   threadList: document.getElementById("thread-list"),
+  mobileChatBackBtn: document.getElementById("mobile-chat-back-btn"),
   chatAvatar: document.getElementById("chat-avatar"),
   chatTitle: document.getElementById("chat-title"),
   chatSubtitle: document.getElementById("chat-subtitle"),
@@ -118,6 +122,7 @@ const elements = {
   draftStatus: document.getElementById("draft-status"),
   typingIndicator: document.getElementById("typing-indicator"),
   attachmentPreview: document.getElementById("attachment-preview"),
+  mentionPanel: document.getElementById("mention-panel"),
   imageInput: document.getElementById("image-input"),
   cameraInput: document.getElementById("camera-input"),
   docInput: document.getElementById("doc-input"),
@@ -184,7 +189,12 @@ const state = {
   cameraReady: false,
   modalCleanup: null,
   undoTimer: null,
-  undoToken: 0
+  undoToken: 0,
+  detailsOpen: false,
+  mobilePanel: "list",
+  mentionSuggestions: [],
+  mentionSelectedIndex: 0,
+  mentionQueryRange: null
 };
 
 init();
@@ -214,11 +224,14 @@ function syncUserSettings() {
 
 function decorateStaticIcons() {
   elements.quickCreateBtn.innerHTML = ICONS.plus;
+  document.getElementById("quick-create-add-icon").innerHTML = ICONS.user;
+  document.getElementById("quick-create-group-icon").innerHTML = ICONS.users;
   document.querySelector(".icon-link").innerHTML = ICONS.gear;
   document.getElementById("logout-btn").innerHTML = ICONS.logout;
   elements.conversationSearchBtn.innerHTML = ICONS.search;
   elements.detailsBtn.innerHTML = ICONS.info;
   elements.conversationMenuBtn.innerHTML = ICONS.more;
+  elements.mobileChatBackBtn.innerHTML = ICONS.arrowLeft;
   elements.selectionCopyBtn.innerHTML = ICONS.copy;
   elements.selectionFavoriteBtn.innerHTML = ICONS.star;
   elements.selectionForwardBtn.innerHTML = ICONS.forward;
@@ -243,14 +256,18 @@ function bindEvents() {
   elements.threadList.addEventListener("click", handleThreadClick);
   elements.composerForm.addEventListener("submit", handleSend);
   elements.composer.addEventListener("input", handleComposerInput);
-    elements.composer.addEventListener("keydown", handleComposerKeydown);
-    elements.emojiBtn.addEventListener("click", toggleEmojiPanel);
-    elements.imageBtn.addEventListener("click", () => elements.imageInput.click());
-    elements.cameraBtn.addEventListener("click", openCameraPreview);
-    elements.fileBtn.addEventListener("click", () => elements.docInput.click());
-    elements.imageInput.addEventListener("change", handleImageUpload);
-    elements.cameraInput.addEventListener("change", handleImageUpload);
-    elements.docInput.addEventListener("change", handleDocUpload);
+  elements.composer.addEventListener("keydown", handleComposerKeydown);
+  elements.composer.addEventListener("click", syncMentionSuggestions);
+  elements.composer.addEventListener("keyup", handleComposerCursorChange);
+  elements.mentionPanel.addEventListener("mousedown", (event) => event.preventDefault());
+  elements.mentionPanel.addEventListener("click", handleMentionPanelClick);
+  elements.emojiBtn.addEventListener("click", toggleEmojiPanel);
+  elements.imageBtn.addEventListener("click", () => elements.imageInput.click());
+  elements.cameraBtn.addEventListener("click", openCameraPreview);
+  elements.fileBtn.addEventListener("click", () => elements.docInput.click());
+  elements.imageInput.addEventListener("change", handleImageUpload);
+  elements.cameraInput.addEventListener("change", handleImageUpload);
+  elements.docInput.addEventListener("change", handleDocUpload);
   elements.voiceBtn.addEventListener("click", toggleRecording);
   elements.quickCreateBtn.addEventListener("click", toggleQuickCreateMenu);
   elements.quickCreateMenu.addEventListener("click", handleQuickCreateMenuClick);
@@ -260,8 +277,9 @@ function bindEvents() {
   elements.conversationMenu.addEventListener("click", handleConversationMenuClick);
   document.getElementById("conversation-search-close").addEventListener("click", toggleConversationSearch);
   elements.conversationSearchInput.addEventListener("input", renderConversationSearch);
-  elements.detailsBtn.addEventListener("click", () => elements.detailsDrawer.classList.toggle("hidden"));
-  document.getElementById("drawer-close").addEventListener("click", () => elements.detailsDrawer.classList.add("hidden"));
+  elements.detailsBtn.addEventListener("click", toggleDetailsDrawer);
+  elements.mobileChatBackBtn.addEventListener("click", handleMobileBack);
+  document.getElementById("drawer-close").addEventListener("click", closeDetailsDrawer);
   elements.pinnedBanner.addEventListener("click", handlePinnedBannerClick);
   elements.messages.addEventListener("click", handleMessageClick);
   elements.drawerBody.addEventListener("click", handleDrawerClick);
@@ -282,7 +300,7 @@ function bindEvents() {
     elements.cameraCaptureBtn.addEventListener("click", captureCameraFrame);
     elements.cameraFallbackBtn.addEventListener("click", useCameraFileFallback);
     window.addEventListener("pageshow", refreshSessionState);
-    window.addEventListener("resize", syncFeedSpacing);
+    window.addEventListener("resize", handleViewportChange);
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "visible") {
         refreshSessionState();
@@ -304,12 +322,15 @@ function selectInitialConversation() {
   const fromUrl = params.get("c");
   const canOpenFromUrl = fromUrl ? Boolean(getConversationDetails(currentUser.id, fromUrl)) : false;
   state.currentConversationId = canOpenFromUrl ? fromUrl : null;
+  state.detailsOpen = false;
   if (state.currentConversationId) {
     state.unreadMarker = getUnreadMarkerForConversation(state.currentConversationId);
     state.pendingOpenMessageId = state.unreadMarker?.messageId || "";
     markConversationRead(currentUser.id, state.currentConversationId);
+    state.mobilePanel = "chat";
   } else {
     state.unreadMarker = null;
+    state.mobilePanel = "list";
   }
 }
 
@@ -320,6 +341,103 @@ function renderAll() {
   renderConversationMenu();
   renderDrawer();
   syncFeedSpacing();
+  syncResponsiveLayout();
+}
+
+function isMobileViewport() {
+  return window.matchMedia("(max-width: 940px)").matches;
+}
+
+function syncResponsiveLayout() {
+  const mobile = isMobileViewport();
+  document.body.classList.toggle("mobile-layout", mobile);
+  document.body.classList.toggle("quick-create-open", mobile && state.openQuickCreateMenu);
+  document.body.classList.toggle("mobile-view-list", mobile && state.mobilePanel === "list");
+  document.body.classList.toggle("mobile-view-chat", mobile && state.mobilePanel === "chat");
+  document.body.classList.toggle("mobile-view-details", mobile && state.mobilePanel === "details");
+  elements.mobileChatBackBtn.classList.toggle("hidden", !mobile || !state.currentConversationId || state.mobilePanel !== "chat");
+  const drawerClose = document.getElementById("drawer-close");
+  if (drawerClose) {
+    drawerClose.innerHTML = mobile ? ICONS.arrowLeft : ICONS.close;
+    drawerClose.title = mobile ? "Voltar" : "Fechar";
+  }
+  if (mobile) {
+    elements.detailsDrawer.classList.toggle("hidden", state.mobilePanel !== "details");
+  } else {
+    elements.detailsDrawer.classList.toggle("hidden", !state.detailsOpen);
+  }
+}
+
+function handleViewportChange() {
+  syncFeedSpacing();
+  if (!isMobileViewport()) {
+    document.body.classList.remove("mobile-view-list", "mobile-view-chat", "mobile-view-details");
+    if (state.mobilePanel === "details" && state.currentConversationId) {
+      state.detailsOpen = true;
+    }
+  } else if (!state.currentConversationId) {
+    state.mobilePanel = "list";
+    state.detailsOpen = false;
+  } else if (state.detailsOpen) {
+    state.mobilePanel = "details";
+  } else if (state.mobilePanel === "list") {
+    state.mobilePanel = "chat";
+  }
+  syncResponsiveLayout();
+}
+
+function toggleDetailsDrawer() {
+  if (!state.currentConversationId) {
+    return;
+  }
+  if (isMobileViewport()) {
+    state.detailsOpen = true;
+    state.mobilePanel = state.mobilePanel === "details" ? "chat" : "details";
+    if (state.mobilePanel !== "details") {
+      state.detailsOpen = false;
+    }
+    syncResponsiveLayout();
+    return;
+  }
+  state.detailsOpen = !state.detailsOpen;
+  syncResponsiveLayout();
+}
+
+function closeDetailsDrawer() {
+  state.detailsOpen = false;
+  if (isMobileViewport()) {
+    state.mobilePanel = state.currentConversationId ? "chat" : "list";
+  }
+  syncResponsiveLayout();
+}
+
+function handleMobileBack() {
+  if (!isMobileViewport()) {
+    return;
+  }
+  if (state.mobilePanel === "details") {
+    closeDetailsDrawer();
+    return;
+  }
+  state.currentConversationId = null;
+  state.unreadMarker = null;
+  state.pendingOpenMessageId = "";
+  state.selectionMode = false;
+  state.selectedMessageIds = [];
+  state.openMessageMenuId = null;
+  state.openReactionPickerId = null;
+  state.openConversationMenu = false;
+  state.openSessionMenu = false;
+  state.detailsOpen = false;
+  state.mobilePanel = "list";
+  setQuickCreateMenuOpen(false);
+  elements.sessionMenu.classList.add("hidden");
+  elements.conversationSearchPanel.classList.add("hidden");
+  closeMentionPanel();
+  clearReply();
+  clearPending();
+  history.replaceState(null, "", "chat.html");
+  renderAll();
 }
 
 function getSelectedConversationMessages() {
@@ -611,7 +729,7 @@ function renderThreads() {
       : item.subtitle;
     const button = document.createElement("button");
     button.type = "button";
-    button.className = `thread-item${item.id === state.currentConversationId ? " active" : ""}${!userSettings.showAvatars ? " no-avatar" : ""}`;
+    button.className = `thread-item${item.id === state.currentConversationId ? " active" : ""}${item.hasUnreadMention ? " mention-alert" : ""}${!userSettings.showAvatars ? " no-avatar" : ""}`;
     button.dataset.conversationId = item.id;
     button.innerHTML = `
       ${renderAvatarMarkup(item, "thread-avatar", item.title)}
@@ -620,6 +738,7 @@ function renderThreads() {
         <div class="thread-subline"><span class="presence-dot ${item.presence}"></span><span>${escapeHtml(subtitle || (item.isArchived ? "Conversa arquivada" : "Sem mensagens"))}</span></div>
       </div>
       <div class="thread-side">
+        ${item.hasUnreadMention ? `<span class="thread-badge mention-badge" title="Voce foi marcado(a)">@${item.mentionCount > 1 ? item.mentionCount : ""}</span>` : ""}
         ${item.isPinnedConversation ? `<span class="thread-badge thread-badge-icon" title="Fixada">${ICONS.pin}</span>` : ""}
         ${item.isArchived ? '<span class="thread-badge">Arquivada</span>' : ""}
         ${item.unreadCount ? `<span class="unread-badge">${item.unreadCount}</span>` : ""}
@@ -663,6 +782,7 @@ function renderConversationMenu() {
 function renderConversation() {
   const details = state.currentConversationId ? getConversationDetails(currentUser.id, state.currentConversationId) : null;
   const messages = state.currentConversationId ? getMessagesForConversation(currentUser.id, state.currentConversationId) : [];
+  closeMentionPanel();
   paintAvatar(elements.chatAvatar, details || { avatar: "AT" }, details?.title || "Conversa");
   elements.chatTitle.textContent = details?.title || "Selecione uma conversa";
   elements.chatSubtitle.textContent = details ? buildSubtitle(details) : "Troque entre contas e grupos";
@@ -692,8 +812,22 @@ function renderConversation() {
   if (!messages.length) {
     elements.messages.innerHTML = '<div class="empty-block tall">Nenhuma mensagem ainda nesta conversa.</div>';
   } else {
-    messages.forEach((message) => {
-      if (state.unreadMarker?.conversationId === state.currentConversationId && state.unreadMarker.messageId === message.id) {
+    let lastDayKey = "";
+    let currentGroup = null;
+    let currentGroupCount = 0;
+    messages.forEach((message, index) => {
+      const messageDayKey = getConversationDayKey(message.createdAt);
+      if (messageDayKey !== lastDayKey) {
+        const dayDivider = document.createElement("div");
+        dayDivider.className = "day-divider";
+        dayDivider.innerHTML = `<span class="day-divider-pill">${escapeHtml(formatConversationDayLabel(message.createdAt))}</span>`;
+        elements.messages.appendChild(dayDivider);
+        lastDayKey = messageDayKey;
+        currentGroup = null;
+        currentGroupCount = 0;
+      }
+      const startsUnreadBlock = state.unreadMarker?.conversationId === state.currentConversationId && state.unreadMarker.messageId === message.id;
+      if (startsUnreadBlock) {
         const divider = document.createElement("div");
         divider.className = "unread-divider";
         divider.innerHTML = `
@@ -703,38 +837,62 @@ function renderConversation() {
           <span class="unread-divider-line" aria-hidden="true"></span>
         `;
         elements.messages.appendChild(divider);
+        currentGroup = null;
+        currentGroupCount = 0;
       }
-      const article = document.createElement("article");
+      const previousMessage = index > 0 ? messages[index - 1] : null;
+      const sameSenderAsPrevious = previousMessage?.senderId === message.senderId;
+      const sameDayAsPrevious = previousMessage ? getConversationDayKey(previousMessage.createdAt) === messageDayKey : false;
+      const continuesSequence = Boolean(currentGroup)
+        && sameSenderAsPrevious
+        && sameDayAsPrevious
+        && !startsUnreadBlock;
+      if (!continuesSequence) {
+        currentGroup = document.createElement("div");
+        currentGroup.className = `message-sequence${message.senderId === currentUser.id ? " mine" : ""}`;
+        elements.messages.appendChild(currentGroup);
+        currentGroupCount = 0;
+      }
+      const row = document.createElement("div");
       const isSelected = state.selectedMessageIds.includes(message.id);
-      article.className = `message${message.senderId === currentUser.id ? " mine" : ""}${isSelected ? " selected" : ""}${state.selectionMode ? " selection-enabled" : ""}`;
-      article.id = `msg-${message.id}`;
-      article.dataset.messageId = message.id;
-      article.innerHTML = `
-        ${state.selectionMode ? `<button class="message-select-btn${isSelected ? " active" : ""}" data-action="select-toggle" type="button" title="Selecionar">${isSelected ? ICONS.check : ""}</button>` : ""}
-        <div class="message-head">
-          <div>
-            <strong>${escapeHtml(message.sender?.name || "Conta")}</strong>
-            ${userSettings.showMessageTime ? `<span class="muted-line">${formatClock(message.createdAt)}</span>` : ""}
-          </div>
-          <div class="message-head-actions">
-            ${message.senderId === currentUser.id ? `<span class="check-status ${message.senderStatus}">${statusIcon(message.senderStatus)}</span>` : ""}
-            ${state.selectionMode ? "" : `<button class="icon-btn mini" data-action="toggle-menu" type="button" title="Opcoes">${ICONS.more}</button>`}
-          </div>
-        </div>
-        ${message.replyTo ? renderReplySnippet(messages, message.replyTo) : ""}
-        <div class="message-text">${renderText(message.text)}</div>
-        ${renderAttachments(message.attachments)}
-        <div class="message-reactions">${renderReactionButtons(message)}</div>
-        ${renderFlags(message)}
-        <div class="message-menu ${state.openMessageMenuId === message.id && !state.selectionMode ? "" : "hidden"}">
-          <button class="icon-btn mini" data-action="reply" type="button" title="Responder">${ICONS.reply}</button>
-          ${message.senderId === currentUser.id ? `<button class="icon-btn mini" data-action="edit" type="button" title="Editar">${ICONS.edit}</button>` : ""}
-          <button class="icon-btn mini" data-action="pin" type="button" title="Pin">${ICONS.pin}</button>
-          <button class="icon-btn mini" data-action="favorite" type="button" title="Favoritar">${ICONS.star}</button>
-          ${message.senderId === currentUser.id ? `<button class="icon-btn mini" data-action="delete" type="button" title="Apagar">${ICONS.trash}</button>` : ""}
+      const showGroupMeta = details.type === "group"
+        && message.senderId !== currentUser.id
+        && !continuesSequence;
+      const showSenderLabel = showGroupMeta;
+      const showMessageAvatar = showGroupMeta && userSettings.showAvatars;
+      const reactionMarkup = renderReactionButtons(message);
+      const footerMarkup = renderMessageFooter(message, reactionMarkup);
+      const bottomMetaMarkup = renderMessageBottomMeta(message);
+      const menuTriggerMarkup = state.selectionMode
+        ? ""
+        : `<button class="message-menu-trigger" data-action="toggle-menu" type="button" title="Opcoes">${ICONS.more}</button>`;
+      row.className = `message-row${message.senderId === currentUser.id ? " mine" : ""}`;
+      row.dataset.messageId = message.id;
+      row.innerHTML = `
+        ${showMessageAvatar ? `<div class="message-avatar-wrap">${renderAvatarMarkup(message.sender || { avatar: "AT", photo: "" }, "member-avatar message-avatar", message.sender?.name || "Conta")}</div>` : ""}
+        <div class="message-stack">
+          ${showSenderLabel ? `<div class="message-sender-label">${escapeHtml(message.sender?.name || "Conta")}</div>` : ""}
+          <article class="message${message.senderId === currentUser.id ? " mine" : ""}${isSelected ? " selected" : ""}${state.selectionMode ? " selection-enabled" : ""}" id="msg-${message.id}">
+            ${state.selectionMode ? `<button class="message-select-btn${isSelected ? " active" : ""}" data-action="select-toggle" type="button" title="Selecionar">${isSelected ? ICONS.check : ""}</button>` : ""}
+            ${menuTriggerMarkup ? `<div class="message-head"><div class="message-head-actions">${menuTriggerMarkup}</div></div>` : ""}
+            ${message.replyTo ? renderReplySnippet(messages, message.replyTo) : ""}
+            <div class="message-text">${renderText(message.text, message)}</div>
+            ${renderAttachments(message.attachments)}
+            ${footerMarkup}
+            <div class="message-menu ${state.openMessageMenuId === message.id && !state.selectionMode ? "" : "hidden"}">
+              <button class="icon-btn mini" data-action="reply" type="button" title="Responder">${ICONS.reply}</button>
+              ${message.senderId === currentUser.id ? `<button class="icon-btn mini" data-action="edit" type="button" title="Editar">${ICONS.edit}</button>` : ""}
+              <button class="icon-btn mini" data-action="pin" type="button" title="Pin">${ICONS.pin}</button>
+              <button class="icon-btn mini" data-action="favorite" type="button" title="Favoritar">${ICONS.star}</button>
+              ${message.senderId === currentUser.id ? `<button class="icon-btn mini" data-action="delete" type="button" title="Apagar">${ICONS.trash}</button>` : ""}
+            </div>
+          </article>
+          ${bottomMetaMarkup}
         </div>
       `;
-      elements.messages.appendChild(article);
+      currentGroup.appendChild(row);
+      currentGroupCount += 1;
+      currentGroup.classList.toggle("stacked", currentGroupCount > 1);
     });
     hydrateAudioPlayers(elements.messages);
   }
@@ -825,15 +983,41 @@ function renderMemberRow(details, member) {
   `;
 }
 
-function renderFlags(message) {
+function renderMessageFooter(message, reactionMarkup) {
   const flags = [];
   if (message.isPinned) {
     flags.push('<span class="flag-chip">Fixada</span>');
   }
+  const cornerActions = [];
   if (message.isFavorite) {
-    flags.unshift(`<span class="favorite-badge" title="Favorita">${ICONS.star}</span>`);
+    cornerActions.push(`<span class="favorite-badge" title="Favorita">${ICONS.star}</span>`);
   }
-  return flags.length ? `<div class="flag-row">${flags.join("")}</div>` : "";
+  if (reactionMarkup) {
+    cornerActions.push(reactionMarkup);
+  }
+  if (!flags.length && !cornerActions.length) {
+    return "";
+  }
+  return `
+    <div class="message-footer">
+      <div class="flag-row">${flags.join("")}</div>
+      ${cornerActions.length ? `<div class="message-corner-actions">${cornerActions.join("")}</div>` : ""}
+    </div>
+  `;
+}
+
+function renderMessageBottomMeta(message) {
+  const parts = [];
+  if (userSettings.showMessageTime) {
+    parts.push(`<span class="muted-line">${formatClock(message.createdAt)}</span>`);
+  }
+  if (message.senderId === currentUser.id) {
+    parts.push(`<span class="check-status ${message.senderStatus}">${statusIcon(message.senderStatus)}</span>`);
+  }
+  if (!parts.length) {
+    return "";
+  }
+  return `<div class="message-bottom-meta${message.senderId === currentUser.id ? " mine" : ""}">${parts.join("")}</div>`;
 }
 
 function renderReplySnippet(messages, replyId) {
@@ -977,7 +1161,7 @@ function attachmentSummary(attachments) {
 }
 
 function renderReactionButtons(message) {
-  if (!userSettings.showReactionBar) {
+  if (!userSettings.showReactionBar || state.selectionMode) {
     return "";
   }
   const counts = REACTIONS
@@ -1248,8 +1432,7 @@ function renderConversationSearch() {
 }
 
 function toggleSessionMenu() {
-  state.openQuickCreateMenu = false;
-  elements.quickCreateMenu.classList.add("hidden");
+  setQuickCreateMenuOpen(false);
   state.openConversationMenu = false;
   renderConversationMenu();
   state.openSessionMenu = !state.openSessionMenu;
@@ -1261,8 +1444,7 @@ function toggleQuickCreateMenu() {
   elements.sessionMenu.classList.add("hidden");
   state.openConversationMenu = false;
   renderConversationMenu();
-  state.openQuickCreateMenu = !state.openQuickCreateMenu;
-  elements.quickCreateMenu.classList.toggle("hidden", !state.openQuickCreateMenu);
+  setQuickCreateMenuOpen(!state.openQuickCreateMenu);
 }
 
 function handleQuickCreateMenuClick(event) {
@@ -1270,8 +1452,7 @@ function handleQuickCreateMenuClick(event) {
   if (!button) {
     return;
   }
-  state.openQuickCreateMenu = false;
-  elements.quickCreateMenu.classList.add("hidden");
+  setQuickCreateMenuOpen(false);
   if (button.dataset.quickAction === "create-group") {
     openCreateGroupModal();
     return;
@@ -1281,14 +1462,20 @@ function handleQuickCreateMenuClick(event) {
   }
 }
 
+function setQuickCreateMenuOpen(open) {
+  state.openQuickCreateMenu = open;
+  elements.quickCreateMenu.classList.toggle("hidden", !open);
+  elements.quickCreateBtn.classList.toggle("active", open);
+  document.body.classList.toggle("quick-create-open", open && isMobileViewport());
+}
+
 function toggleConversationMenu() {
   if (!state.currentConversationId) {
     return;
   }
   state.openSessionMenu = false;
   elements.sessionMenu.classList.add("hidden");
-  state.openQuickCreateMenu = false;
-  elements.quickCreateMenu.classList.add("hidden");
+  setQuickCreateMenuOpen(false);
   state.openConversationMenu = !state.openConversationMenu;
   renderConversationMenu();
 }
@@ -1340,6 +1527,8 @@ function syncConversationSelection() {
   if (!state.currentConversationId) {
     state.selectionMode = false;
     state.selectedMessageIds = [];
+    state.detailsOpen = false;
+    state.mobilePanel = "list";
     history.replaceState(null, "", "chat.html");
     return;
   }
@@ -1350,6 +1539,8 @@ function syncConversationSelection() {
   state.selectionMode = false;
   state.selectedMessageIds = [];
   state.currentConversationId = null;
+  state.detailsOpen = false;
+  state.mobilePanel = "list";
   history.replaceState(null, "", "chat.html");
 }
 
@@ -1377,6 +1568,8 @@ function showUndoToast(message, snapshot, previousConversationId = state.current
     importState(snapshot);
     syncUserSettings();
     state.currentConversationId = previousConversationId;
+    state.detailsOpen = false;
+    state.mobilePanel = previousConversationId ? "chat" : "list";
     syncConversationSelection();
     renderAll();
     hideUndoToast();
@@ -1416,10 +1609,12 @@ function selectConversation(conversationId) {
   state.openMessageMenuId = null;
   state.openReactionPickerId = null;
   state.openConversationMenu = false;
-  state.openQuickCreateMenu = false;
   state.openSessionMenu = false;
-  elements.quickCreateMenu.classList.add("hidden");
+  state.detailsOpen = false;
+  state.mobilePanel = "chat";
+  setQuickCreateMenuOpen(false);
   elements.sessionMenu.classList.add("hidden");
+  elements.conversationSearchPanel.classList.add("hidden");
   clearReply();
   clearPending();
   markConversationRead(currentUser.id, conversationId);
@@ -1428,11 +1623,165 @@ function selectConversation(conversationId) {
   positionConversationViewport(firstUnreadMessageId);
 }
 
+function closeMentionPanel() {
+  state.mentionSuggestions = [];
+  state.mentionSelectedIndex = 0;
+  state.mentionQueryRange = null;
+  elements.mentionPanel.innerHTML = "";
+  elements.mentionPanel.classList.add("hidden");
+}
+
+function getMentionContext() {
+  if (!state.currentConversationId) {
+    return null;
+  }
+  const details = getConversationDetails(currentUser.id, state.currentConversationId);
+  if (!details || details.type !== "group") {
+    return null;
+  }
+  const cursorStart = elements.composer.selectionStart ?? 0;
+  const cursorEnd = elements.composer.selectionEnd ?? cursorStart;
+  if (cursorStart !== cursorEnd) {
+    return null;
+  }
+  const beforeCursor = elements.composer.value.slice(0, cursorStart);
+  const match = beforeCursor.match(/(^|[\s(])@([a-z0-9._-]*)$/i);
+  if (!match) {
+    return null;
+  }
+  return {
+    details,
+    query: sanitizeUsernameInput(match[2] || ""),
+    start: cursorStart - (match[2] || "").length - 1,
+    end: cursorStart
+  };
+}
+
+function normalizeSearchValue(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
+
+function renderMentionPanel() {
+  if (!state.mentionQueryRange) {
+    closeMentionPanel();
+    return;
+  }
+  if (!state.mentionSuggestions.length) {
+    elements.mentionPanel.innerHTML = '<div class="mention-empty">Nenhum participante encontrado.</div>';
+    elements.mentionPanel.classList.remove("hidden");
+    return;
+  }
+  elements.mentionPanel.innerHTML = state.mentionSuggestions.map((member, index) => `
+    <button class="mention-item${index === state.mentionSelectedIndex ? " active" : ""}" data-user-id="${member.id}" type="button">
+      ${renderAvatarMarkup(member, "member-avatar mention-avatar", member.name)}
+      <span class="mention-copy">
+        <strong>${escapeHtml(member.name)}</strong>
+        <small>@${escapeHtml(member.username)}</small>
+      </span>
+    </button>
+  `).join("");
+  elements.mentionPanel.classList.remove("hidden");
+}
+
+function syncMentionSuggestions() {
+  const context = getMentionContext();
+  if (!context) {
+    closeMentionPanel();
+    return;
+  }
+  const previousActiveId = state.mentionSuggestions[state.mentionSelectedIndex]?.id || "";
+  const suggestions = getGroupMembers(context.details.threadId, currentUser.id)
+    .filter((member) => member.id !== currentUser.id)
+    .filter((member) => {
+      if (!context.query) {
+        return true;
+      }
+      const username = sanitizeUsernameInput(member.username);
+      const normalizedName = normalizeSearchValue(member.name);
+      return username.includes(context.query) || normalizedName.includes(context.query);
+    })
+    .sort((left, right) => {
+      const leftStarts = sanitizeUsernameInput(left.username).startsWith(context.query) ? 1 : 0;
+      const rightStarts = sanitizeUsernameInput(right.username).startsWith(context.query) ? 1 : 0;
+      if (leftStarts !== rightStarts) {
+        return rightStarts - leftStarts;
+      }
+      return left.name.localeCompare(right.name, "pt-BR");
+    })
+    .slice(0, 7);
+  state.mentionSuggestions = suggestions;
+  state.mentionQueryRange = { start: context.start, end: context.end };
+  const nextIndex = suggestions.findIndex((member) => member.id === previousActiveId);
+  state.mentionSelectedIndex = nextIndex >= 0 ? nextIndex : 0;
+  renderMentionPanel();
+}
+
+function applyMentionSuggestion(userId) {
+  const member = state.mentionSuggestions.find((item) => item.id === userId);
+  if (!member || !state.mentionQueryRange) {
+    closeMentionPanel();
+    return;
+  }
+  const mentionText = `@${member.username} `;
+  const nextValue = `${elements.composer.value.slice(0, state.mentionQueryRange.start)}${mentionText}${elements.composer.value.slice(state.mentionQueryRange.end)}`;
+  const nextCursor = state.mentionQueryRange.start + mentionText.length;
+  elements.composer.value = nextValue;
+  elements.composer.setSelectionRange(nextCursor, nextCursor);
+  closeMentionPanel();
+  handleComposerInput();
+  elements.composer.focus();
+}
+
+function handleMentionPanelClick(event) {
+  const button = event.target.closest("[data-user-id]");
+  if (!button) {
+    return;
+  }
+  applyMentionSuggestion(button.dataset.userId);
+}
+
+function handleComposerCursorChange(event) {
+  if (event.key === "ArrowUp" || event.key === "ArrowDown" || event.key === "Enter" || event.key === "Tab" || event.key === "Escape") {
+    return;
+  }
+  syncMentionSuggestions();
+}
+
+function findMentionTargetByHandle(handle) {
+  const normalizedHandle = sanitizeUsernameInput(handle);
+  if (!normalizedHandle) {
+    return null;
+  }
+  const details = state.currentConversationId ? getConversationDetails(currentUser.id, state.currentConversationId) : null;
+  if (details?.type === "group") {
+    const fromGroup = getGroupMembers(details.threadId, currentUser.id)
+      .find((member) => sanitizeUsernameInput(member.username) === normalizedHandle);
+    if (fromGroup) {
+      return fromGroup;
+    }
+  }
+  return listUsersForPicker(currentUser.id).find((user) => sanitizeUsernameInput(user.username) === normalizedHandle) || null;
+}
+
+function openMentionDirectChat(handle) {
+  const targetUser = findMentionTargetByHandle(handle);
+  if (!targetUser || targetUser.id === currentUser.id) {
+    return;
+  }
+  addContact(currentUser.id, targetUser.id);
+  selectConversation(getConversationIdForDirect(targetUser.id));
+}
+
 function handleComposerInput() {
   autoResizeComposer();
   if (!state.currentConversationId) {
+    closeMentionPanel();
     return;
   }
+  syncMentionSuggestions();
   saveDraft(currentUser.id, state.currentConversationId, elements.composer.value);
   elements.draftStatus.textContent = "Draft salvo";
   if (!userSettings.showTypingIndicator) {
@@ -1445,6 +1794,25 @@ function handleComposerInput() {
 }
 
 function handleComposerKeydown(event) {
+  if (!elements.mentionPanel.classList.contains("hidden")) {
+    if ((event.key === "ArrowDown" || event.key === "ArrowUp") && state.mentionSuggestions.length) {
+      event.preventDefault();
+      const delta = event.key === "ArrowDown" ? 1 : -1;
+      state.mentionSelectedIndex = (state.mentionSelectedIndex + delta + state.mentionSuggestions.length) % state.mentionSuggestions.length;
+      renderMentionPanel();
+      return;
+    }
+    if ((event.key === "Enter" || event.key === "Tab") && state.mentionSuggestions.length) {
+      event.preventDefault();
+      applyMentionSuggestion(state.mentionSuggestions[state.mentionSelectedIndex].id);
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeMentionPanel();
+      return;
+    }
+  }
   const shouldSendOnEnter = userSettings.enterToSend;
   const wantsShortcutSend = event.key === "Enter" && (event.ctrlKey || event.metaKey);
   if ((shouldSendOnEnter && event.key === "Enter" && !event.shiftKey) || (!shouldSendOnEnter && wantsShortcutSend)) {
@@ -1489,6 +1857,7 @@ function handleSend(event) {
     return;
   }
   elements.composer.value = "";
+  closeMentionPanel();
   autoResizeComposer(true);
   saveDraft(currentUser.id, state.currentConversationId, "");
   clearReply();
@@ -1720,7 +2089,7 @@ async function toggleRecording() {
 }
 
 function handleMessageClick(event) {
-  const articleTarget = event.target.closest(".message");
+  const articleTarget = event.target.closest(".message-row");
   if (state.selectionMode && articleTarget && !event.target.closest("button[data-action]") && !event.target.closest("a") && !event.target.closest("audio") && !event.target.closest("input")) {
     toggleMessageSelection(articleTarget.dataset.messageId);
     return;
@@ -1728,7 +2097,7 @@ function handleMessageClick(event) {
   const imageTarget = event.target.closest("img[data-image]");
   if (imageTarget) {
     if (state.selectionMode) {
-      toggleMessageSelection(imageTarget.closest(".message")?.dataset.messageId);
+      toggleMessageSelection(imageTarget.closest(".message-row")?.dataset.messageId);
       return;
     }
     openLightbox(imageTarget.dataset.image);
@@ -1751,8 +2120,9 @@ function handleMessageClick(event) {
   if (!target) {
     return;
   }
-  const article = target.closest(".message");
-  const messageId = article?.dataset.messageId;
+  const messageContainer = target.closest("[data-message-id]");
+  const messageId = messageContainer?.dataset.messageId;
+  const article = target.closest(".message") || document.getElementById(`msg-${messageId}`);
   if (!messageId) {
     return;
   }
@@ -1781,6 +2151,10 @@ function handleMessageClick(event) {
     state.replyTo = messageId;
     renderConversation();
     elements.composer.focus();
+    return;
+  }
+  if (action === "open-mention") {
+    openMentionDirectChat(target.dataset.mentionHandle);
     return;
   }
   if (action === "jump-reply") {
@@ -1931,6 +2305,10 @@ function handleOuterClick(event) {
   if (!insideEmoji) {
     elements.emojiPanel.classList.add("hidden");
   }
+  const insideMention = event.target.closest("#mention-panel") || event.target.closest("#composer");
+  if (!insideMention) {
+    closeMentionPanel();
+  }
   if (state.openReactionPickerId && !event.target.closest(".reaction-strip")) {
     state.openReactionPickerId = null;
     renderConversation();
@@ -1940,8 +2318,7 @@ function handleOuterClick(event) {
     renderConversationMenu();
   }
   if (state.openQuickCreateMenu && !event.target.closest(".quick-create-wrap")) {
-    state.openQuickCreateMenu = false;
-    elements.quickCreateMenu.classList.add("hidden");
+    setQuickCreateMenuOpen(false);
   }
   if (state.openSessionMenu && !event.target.closest(".session-menu-wrap")) {
     state.openSessionMenu = false;
@@ -2321,8 +2698,19 @@ function syncFeedSpacing() {
   elements.messages.style.scrollPaddingBottom = `${Math.max(24, inset)}px`;
 }
 
-function renderText(text) {
-  return escapeHtml(text).replace(/(https?:\/\/\S+)/g, '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>').replace(/\n/g, "<br>");
+function renderText(text, message = null) {
+  const escaped = escapeHtml(text);
+  const linked = escaped.replace(/(https?:\/\/\S+)/g, '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
+  return linked
+    .replace(/(^|[\s(])@([a-z0-9._-]{3,})/gi, (_, prefix, handle) => {
+      const normalizedHandle = sanitizeUsernameInput(handle);
+      const isCurrentUser = normalizedHandle === sanitizeUsernameInput(currentUser.username);
+      const mentionedInPayload = Array.isArray(message?.mentions) && message.mentions.length
+        ? message.mentionsCurrentUser && isCurrentUser
+        : false;
+      return `${prefix}<button class="mention-tag${isCurrentUser ? " self" : ""}${mentionedInPayload ? " intense" : ""}" data-action="open-mention" data-mention-handle="${escapeHtml(handle)}" type="button">@${escapeHtml(handle)}</button>`;
+    })
+    .replace(/\n/g, "<br>");
 }
 
 function sanitizeUsernameInput(value) {
@@ -2657,6 +3045,30 @@ function formatLastSeen(lastSeenAt, presence) {
     return `ativo ha ${formatRelative(lastSeenAt)}`;
   }
   return `ultima vez online ${formatRelative(lastSeenAt)}`;
+}
+
+function getConversationDayKey(value) {
+  const date = new Date(value);
+  return `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`;
+}
+
+function formatConversationDayLabel(value) {
+  const date = new Date(value);
+  const today = new Date();
+  const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const dateStart = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const diffDays = Math.round((todayStart - dateStart) / 86400000);
+  if (diffDays === 0) {
+    return "Hoje";
+  }
+  if (diffDays === 1) {
+    return "Ontem";
+  }
+  return date.toLocaleDateString("pt-BR", {
+    day: "2-digit",
+    month: "long",
+    year: "numeric"
+  });
 }
 
 function refreshSessionState() {

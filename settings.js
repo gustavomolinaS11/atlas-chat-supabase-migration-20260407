@@ -25,12 +25,14 @@ import {
 const currentUser = requireSession("index.html");
 
 const ICONS = {
+  arrowLeft: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/><path d="M9 12h10"/></svg>',
   sun: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v2.5M12 18.5V21M4.93 4.93l1.77 1.77M17.3 17.3l1.77 1.77M3 12h2.5M18.5 12H21M4.93 19.07l1.77-1.77M17.3 6.7l1.77-1.77M12 7a5 5 0 1 1-5 5 5 5 0 0 1 5-5Z"/></svg>',
   moon: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8.5 8.5 0 1 1 9.5 4 7 7 0 0 0 20 14.5Z"/></svg>'
 };
 
 const elements = {
   avatar: document.getElementById("settings-avatar"),
+  mobileBackLink: document.querySelector(".settings-mobile-back"),
   name: document.getElementById("settings-name"),
   handle: document.getElementById("settings-handle"),
   profilePreview: document.getElementById("profile-photo-preview"),
@@ -43,8 +45,8 @@ const elements = {
   saturation: document.getElementById("saturation-range"),
   modeToggle: document.getElementById("mode-toggle"),
   fontScale: document.getElementById("font-scale-select"),
+  bubbleSize: document.getElementById("bubble-size-select"),
   wallpaperGlow: document.getElementById("wallpaper-glow-toggle"),
-  wideBubbles: document.getElementById("wide-bubbles-toggle"),
   compactMode: document.getElementById("compact-mode-toggle"),
   showAvatars: document.getElementById("show-avatars-toggle"),
   showSidebarPreview: document.getElementById("show-sidebar-preview-toggle"),
@@ -80,6 +82,9 @@ async function init() {
   }
   await ensureStore();
   settings = getSettings(currentUser.id);
+  if (elements.mobileBackLink) {
+    elements.mobileBackLink.innerHTML = ICONS.arrowLeft;
+  }
   applyTheme(settings);
   applyDisplayPreferences(settings);
   bindEvents();
@@ -102,8 +107,8 @@ function bindEvents() {
   elements.saturation.addEventListener("input", handleSaturation);
   elements.modeToggle.addEventListener("click", handleModeToggle);
   elements.fontScale.addEventListener("change", handleDisplaySettingsChange);
+  elements.bubbleSize.addEventListener("change", handleDisplaySettingsChange);
   elements.wallpaperGlow.addEventListener("change", handleDisplaySettingsChange);
-  elements.wideBubbles.addEventListener("change", handleDisplaySettingsChange);
   elements.compactMode.addEventListener("change", handleDisplaySettingsChange);
   elements.showAvatars.addEventListener("change", handleDisplaySettingsChange);
   elements.showSidebarPreview.addEventListener("change", handleDisplaySettingsChange);
@@ -141,8 +146,8 @@ function renderAll() {
   elements.profileBio.value = user.bio || "";
   elements.saturation.value = String(settings.saturation || 1);
   elements.fontScale.value = settings.fontScale;
+  elements.bubbleSize.value = settings.bubbleSize;
   elements.wallpaperGlow.checked = settings.wallpaperGlow;
-  elements.wideBubbles.checked = settings.wideBubbles;
   elements.compactMode.checked = settings.compactMode;
   elements.showAvatars.checked = settings.showAvatars;
   elements.showSidebarPreview.checked = settings.showSidebarPreview;
@@ -284,8 +289,8 @@ function handleDisplaySettingsChange() {
   settings = {
     ...settings,
     fontScale: elements.fontScale.value,
+    bubbleSize: elements.bubbleSize.value,
     wallpaperGlow: elements.wallpaperGlow.checked,
-    wideBubbles: elements.wideBubbles.checked,
     compactMode: elements.compactMode.checked,
     showAvatars: elements.showAvatars.checked,
     showSidebarPreview: elements.showSidebarPreview.checked,

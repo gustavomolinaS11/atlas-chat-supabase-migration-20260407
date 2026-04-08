@@ -24,7 +24,7 @@ create table if not exists public.profiles (
 create table if not exists public.user_settings (
   user_id uuid primary key references public.profiles(id) on delete cascade,
   privacy jsonb not null default '{"lastSeen":"everyone","profilePhoto":"everyone","readReceipts":"everyone"}'::jsonb,
-  settings jsonb not null default '{"mode":"dark","accent":"#35c2ff","accentAlt":"#45e0b1","saturation":1,"fontScale":"md","compactMode":false,"showAvatars":true,"showMessageTime":true,"showTypingIndicator":true,"enterToSend":true,"showSidebarPreview":true,"showReactionBar":true,"blurMedia":false,"wideBubbles":false,"wallpaperGlow":true}'::jsonb,
+  settings jsonb not null default '{"mode":"dark","accent":"#35c2ff","accentAlt":"#45e0b1","saturation":1,"fontScale":"md","bubbleSize":"sm","compactMode":false,"showAvatars":true,"showMessageTime":true,"showTypingIndicator":true,"enterToSend":true,"showSidebarPreview":true,"showReactionBar":true,"blurMedia":false,"wideBubbles":false,"wallpaperGlow":true}'::jsonb,
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now())
 );
