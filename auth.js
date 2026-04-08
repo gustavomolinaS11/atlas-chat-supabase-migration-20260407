@@ -1,9 +1,15 @@
 import {
   ensureStore,
-  loginUser,
-  redirectIfAuthenticated,
-  registerUser
+  logoutUser,
+  upsertRemoteSessionUser
 } from "./store.js";
+import {
+  getCurrentSession,
+  signInWithEmail,
+  signOutUser,
+  signUpWithEmail
+} from "./src/services/remote/authService.js";
+import { getMyProfile } from "./src/services/remote/profileService.js";
 
 const elements = {
   loginTab: document.getElementById("login-tab"),
@@ -18,14 +24,20 @@ const elements = {
   registerEmail: document.getElementById("register-email"),
   registerBio: document.getElementById("register-bio"),
   registerPassword: document.getElementById("register-password"),
-  registerConfirmPassword: document.getElementById("register-confirm-password")
+  registerConfirmPassword: document.getElementById("register-confirm-password"),
+  loginSubmit: document.querySelector("#login-form button[type='submit']"),
+  registerSubmit: document.querySelector("#register-form button[type='submit']")
+};
+
+const state = {
+  pending: false
 };
 
 init();
 
 async function init() {
   await ensureStore();
-  redirectIfAuthenticated("chat.html");
+  await syncRemoteSession();
   bindEvents();
 }
 
@@ -37,13 +49,58 @@ function bindEvents() {
   elements.registerUsername.addEventListener("input", handleUsernameInput);
 }
 
+function setFeedback(message) {
+  elements.feedback.textContent = message || "";
+}
+
+function setPending(kind, pending) {
+  state.pending = pending;
+  const isLogin = kind === "login";
+  elements.loginSubmit.disabled = pending;
+  elements.registerSubmit.disabled = pending;
+  elements.loginIdentifier.disabled = pending;
+  elements.loginPassword.disabled = pending;
+  elements.registerName.disabled = pending;
+  elements.registerUsername.disabled = pending;
+  elements.registerEmail.disabled = pending;
+  elements.registerBio.disabled = pending;
+  elements.registerPassword.disabled = pending;
+  elements.registerConfirmPassword.disabled = pending;
+  elements.loginSubmit.textContent = pending && isLogin ? "Entrando..." : "Entrar";
+  elements.registerSubmit.textContent = pending && !isLogin ? "Criando conta..." : "Criar conta";
+}
+
+function normalizeAuthError(error) {
+  const raw = String(error?.message || error || "").trim();
+  const normalized = raw.toLowerCase();
+  if (!raw) {
+    return "Nao foi possivel concluir a autenticacao.";
+  }
+  if (normalized.includes("security purposes") || normalized.includes("after 58 seconds") || normalized.includes("rate limit")) {
+    return "Muitas tentativas em pouco tempo. Espere cerca de 1 minuto e tente novamente.";
+  }
+  if (normalized.includes("invalid login credentials")) {
+    return "Email ou senha invalidos.";
+  }
+  if (normalized.includes("user already registered")) {
+    return "Esse email ja esta cadastrado.";
+  }
+  if (normalized.includes("duplicate key") && normalized.includes("username")) {
+    return "Username ja existe.";
+  }
+  if (normalized.includes("email not confirmed")) {
+    return "O email ainda nao foi confirmado no Supabase.";
+  }
+  return raw;
+}
+
 function setTab(kind) {
   const login = kind === "login";
   elements.loginTab.classList.toggle("active", login);
   elements.registerTab.classList.toggle("active", !login);
   elements.loginForm.classList.toggle("hidden", !login);
   elements.registerForm.classList.toggle("hidden", login);
-  elements.feedback.textContent = "";
+  setFeedback("");
 }
 
 function sanitizeUsernameInput(value) {
@@ -59,40 +116,114 @@ function handleUsernameInput() {
   const sanitized = sanitizeUsernameInput(elements.registerUsername.value);
   elements.registerUsername.value = sanitized;
   if (sanitized && sanitized.length < 3) {
-    elements.feedback.textContent = "Usuario com no minimo 3 caracteres, sem espacos ou acentos.";
+    setFeedback("Usuario com no minimo 3 caracteres, sem espacos ou acentos.");
     return;
   }
   if (!elements.registerForm.classList.contains("hidden")) {
-    elements.feedback.textContent = "";
+    setFeedback("");
   }
 }
 
-function handleLogin(event) {
-  event.preventDefault();
-  const result = loginUser(elements.loginIdentifier.value, elements.loginPassword.value);
+async function syncRemoteSession() {
+  try {
+    const session = await getCurrentSession();
+    if (!session?.user) {
+      logoutUser();
+      return;
+    }
+    await finalizeRemoteSession(session.user);
+    window.location.href = "chat.html";
+  } catch (error) {
+    console.error(error);
+    setFeedback("Nao foi possivel validar a sessao do Supabase.");
+  }
+}
+
+async function finalizeRemoteSession(authUser) {
+  let profile = null;
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    profile = await getMyProfile();
+    if (profile) {
+      break;
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, 250));
+  }
+  if (!profile) {
+    throw new Error("Conta criada, mas o perfil ainda nao apareceu no banco. Espere alguns segundos e tente entrar.");
+  }
+  const result = upsertRemoteSessionUser(profile, authUser);
   if (!result.ok) {
-    elements.feedback.textContent = result.error;
+    throw new Error(result.error || "Falha ao sincronizar sessao local");
+  }
+  return result.user;
+}
+
+async function handleLogin(event) {
+  event.preventDefault();
+  if (state.pending) {
     return;
   }
-  window.location.href = "chat.html";
+  const identifier = String(elements.loginIdentifier.value || "").trim().toLowerCase();
+  if (!identifier.includes("@")) {
+    setFeedback("No Supabase, entre com email. O login por usuario entra depois.");
+    return;
+  }
+  setFeedback("Validando credenciais...");
+  setPending("login", true);
+  try {
+    const data = await signInWithEmail({
+      email: identifier,
+      password: elements.loginPassword.value
+    });
+    await finalizeRemoteSession(data.user);
+    window.location.href = "chat.html";
+  } catch (error) {
+    console.error(error);
+    setFeedback(normalizeAuthError(error));
+  } finally {
+    setPending("login", false);
+  }
 }
 
-function handleRegister(event) {
+async function handleRegister(event) {
   event.preventDefault();
+  if (state.pending) {
+    return;
+  }
   if (elements.registerPassword.value !== elements.registerConfirmPassword.value) {
-    elements.feedback.textContent = "As senhas nao conferem.";
+    setFeedback("As senhas nao conferem.");
     return;
   }
-  const result = registerUser({
-    name: elements.registerName.value,
-    username: elements.registerUsername.value,
-    email: elements.registerEmail.value,
-    bio: elements.registerBio.value,
-    password: elements.registerPassword.value
-  });
-  if (!result.ok) {
-    elements.feedback.textContent = result.error;
+  const username = sanitizeUsernameInput(elements.registerUsername.value);
+  elements.registerUsername.value = username;
+  if (!username || username.length < 3) {
+    setFeedback("Usuario sem acentos ou espacos. Use ao menos 3 caracteres.");
     return;
   }
-  window.location.href = "chat.html";
+  setFeedback("Criando conta no Supabase...");
+  setPending("register", true);
+  try {
+    const signUpData = await signUpWithEmail({
+      name: elements.registerName.value.trim(),
+      username,
+      email: elements.registerEmail.value.trim().toLowerCase(),
+      password: elements.registerPassword.value
+    });
+    const authUser = signUpData.user;
+    const sessionUser = signUpData.session?.user || authUser;
+    if (!sessionUser) {
+      setFeedback("Conta criada, mas a sessao nao foi aberta. Se o login nao entrar sozinho, a confirmacao de email ainda esta ligada no Supabase.");
+      return;
+    }
+    await finalizeRemoteSession(sessionUser);
+    window.location.href = "chat.html";
+  } catch (error) {
+    console.error(error);
+    setFeedback(normalizeAuthError(error));
+    try {
+      await signOutUser();
+    } catch {}
+  } finally {
+    setPending("register", false);
+  }
 }

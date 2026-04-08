@@ -16,11 +16,13 @@ import {
   getPinnedMessagesForUser,
   getSettings,
   importState,
+  logoutUser,
   requireSession,
   saveSettings,
   searchMessagesForUser,
   updateUserProfile
 } from "./store.js";
+import { getCurrentSession as getRemoteSession, signOutUser as signOutRemoteUser } from "./src/services/remote/authService.js";
 
 const currentUser = requireSession("index.html");
 
@@ -80,6 +82,11 @@ async function init() {
   if (!currentUser) {
     return;
   }
+  const remoteSession = await getRemoteSession().catch(() => null);
+  if (!remoteSession?.user) {
+    logoutLocalAndRedirect();
+    return;
+  }
   await ensureStore();
   settings = getSettings(currentUser.id);
   if (elements.mobileBackLink) {
@@ -89,6 +96,14 @@ async function init() {
   applyDisplayPreferences(settings);
   bindEvents();
   renderAll();
+}
+
+async function logoutLocalAndRedirect() {
+  try {
+    await signOutRemoteUser();
+  } catch {}
+  logoutUser();
+  window.location.href = "index.html";
 }
 
 function bindEvents() {

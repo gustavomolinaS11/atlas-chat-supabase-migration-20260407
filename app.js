@@ -6,7 +6,6 @@
   clearConversationHistory,
   clipText,
   createGroup,
-  deleteMessage,
   deleteMessages,
   ensureStore,
   exportState,
@@ -41,6 +40,10 @@
   updateGroup,
   updateMessage
 } from "./store.js";
+import {
+  getCurrentSession as getRemoteSession,
+  signOutUser as signOutRemoteUser
+} from "./src/services/remote/authService.js";
 
 const currentUser = requireSession("index.html");
 let userSettings = currentUser ? getSettings(currentUser.id) : null;
@@ -56,6 +59,7 @@ const AUDIO_SPEEDS = [1, 1.5, 2];
 
 const ICONS = {
   arrowLeft: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/><path d="M9 12h10"/></svg>',
+  arrowUp: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 5 0 14"/><path d="m6 13 6 6 6-6"/></svg>',
   plus: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>',
   gear: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.5A3.5 3.5 0 1 1 8.5 12 3.5 3.5 0 0 1 12 8.5Zm0-6 1.1 2.6 2.8.5-.8 2.7 1.9 2-1.9 2 .8 2.7-2.8.5L12 21.5l-1.1-2.6-2.8-.5.8-2.7-1.9-2 1.9-2-.8-2.7 2.8-.5Z"/></svg>',
   logout: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 17v2H5V5h5v2M14 7l5 5-5 5M19 12H9"/></svg>',
@@ -108,6 +112,8 @@ const elements = {
   conversationSearchBtn: document.getElementById("conversation-search-btn"),
   detailsBtn: document.getElementById("details-btn"),
   pinnedBanner: document.getElementById("pinned-banner"),
+  mentionJumpBtn: document.getElementById("mention-jump-btn"),
+  mentionJumpLabel: document.getElementById("mention-jump-label"),
   selectionBar: document.getElementById("selection-bar"),
   selectionCount: document.getElementById("selection-count"),
   selectionHint: document.getElementById("selection-hint"),
@@ -166,6 +172,8 @@ const state = {
   pendingDocs: [],
   pendingAudio: [],
   typingTimer: null,
+  draftSaveTimer: null,
+  pendingDraftSave: null,
   recorder: null,
   stream: null,
   recordingStartedAt: 0,
@@ -182,6 +190,7 @@ const state = {
   openSessionMenu: false,
   pendingOpenMessageId: "",
   unreadMarker: null,
+  mentionJumpMarker: null,
   selectionMode: false,
   selectedMessageIds: [],
   cameraStream: null,
@@ -201,6 +210,12 @@ init();
 
 async function init() {
   if (!currentUser) {
+    return;
+  }
+  const remoteSession = await getRemoteSession().catch(() => null);
+  if (!remoteSession?.user) {
+    logoutUser();
+    window.location.href = "index.html";
     return;
   }
   await ensureStore();
@@ -231,6 +246,7 @@ function decorateStaticIcons() {
   elements.conversationSearchBtn.innerHTML = ICONS.search;
   elements.detailsBtn.innerHTML = ICONS.info;
   elements.conversationMenuBtn.innerHTML = ICONS.more;
+  elements.mentionJumpBtn.querySelector(".mention-jump-icon").innerHTML = ICONS.arrowUp;
   elements.mobileChatBackBtn.innerHTML = ICONS.arrowLeft;
   elements.selectionCopyBtn.innerHTML = ICONS.copy;
   elements.selectionFavoriteBtn.innerHTML = ICONS.star;
@@ -281,6 +297,7 @@ function bindEvents() {
   elements.mobileChatBackBtn.addEventListener("click", handleMobileBack);
   document.getElementById("drawer-close").addEventListener("click", closeDetailsDrawer);
   elements.pinnedBanner.addEventListener("click", handlePinnedBannerClick);
+  elements.mentionJumpBtn.addEventListener("click", handleMentionJump);
   elements.messages.addEventListener("click", handleMessageClick);
   elements.drawerBody.addEventListener("click", handleDrawerClick);
   elements.selectionCopyBtn.addEventListener("click", handleSelectionCopy);
@@ -300,11 +317,13 @@ function bindEvents() {
     elements.cameraCaptureBtn.addEventListener("click", captureCameraFrame);
     elements.cameraFallbackBtn.addEventListener("click", useCameraFileFallback);
     window.addEventListener("pageshow", refreshSessionState);
+    window.addEventListener("beforeunload", flushPendingDraftSave);
     window.addEventListener("resize", handleViewportChange);
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "visible") {
         refreshSessionState();
       } else {
+        flushPendingDraftSave();
         closeCameraPreview();
       }
     });
@@ -317,6 +336,28 @@ function setFilter(filter) {
   renderAll();
 }
 
+function scheduleDraftSave(conversationId, value) {
+  if (!conversationId) {
+    return;
+  }
+  state.pendingDraftSave = { conversationId, value: String(value || "") };
+  clearTimeout(state.draftSaveTimer);
+  state.draftSaveTimer = window.setTimeout(() => {
+    flushPendingDraftSave();
+  }, 180);
+}
+
+function flushPendingDraftSave() {
+  clearTimeout(state.draftSaveTimer);
+  state.draftSaveTimer = null;
+  if (!state.pendingDraftSave) {
+    return;
+  }
+  const pending = state.pendingDraftSave;
+  state.pendingDraftSave = null;
+  saveDraft(currentUser.id, pending.conversationId, pending.value);
+}
+
 function selectInitialConversation() {
   const params = new URLSearchParams(window.location.search);
   const fromUrl = params.get("c");
@@ -325,11 +366,13 @@ function selectInitialConversation() {
   state.detailsOpen = false;
   if (state.currentConversationId) {
     state.unreadMarker = getUnreadMarkerForConversation(state.currentConversationId);
+    state.mentionJumpMarker = getMentionJumpMarkerForConversation(state.currentConversationId);
     state.pendingOpenMessageId = state.unreadMarker?.messageId || "";
     markConversationRead(currentUser.id, state.currentConversationId);
     state.mobilePanel = "chat";
   } else {
     state.unreadMarker = null;
+    state.mentionJumpMarker = null;
     state.mobilePanel = "list";
   }
 }
@@ -415,12 +458,14 @@ function handleMobileBack() {
   if (!isMobileViewport()) {
     return;
   }
+  flushPendingDraftSave();
   if (state.mobilePanel === "details") {
     closeDetailsDrawer();
     return;
   }
   state.currentConversationId = null;
   state.unreadMarker = null;
+  state.mentionJumpMarker = null;
   state.pendingOpenMessageId = "";
   state.selectionMode = false;
   state.selectedMessageIds = [];
@@ -633,6 +678,14 @@ function handleSelectionDelete() {
   if (!selectedMessages.length) {
     return;
   }
+  openDeleteMessagesModal(selectedMessages);
+}
+
+function openDeleteMessagesModal(messages) {
+  const selectedMessages = Array.isArray(messages) ? messages : [];
+  if (!selectedMessages.length) {
+    return;
+  }
   const ownOnly = selectedMessages.every((message) => message.senderId === currentUser.id);
   openHtmlModal({
     kicker: "Apagar",
@@ -787,6 +840,7 @@ function renderConversation() {
   elements.chatTitle.textContent = details?.title || "Selecione uma conversa";
   elements.chatSubtitle.textContent = details ? buildSubtitle(details) : "Troque entre contas e grupos";
   renderPinnedBanner();
+  renderMentionJumpButton();
   elements.messages.innerHTML = "";
   if (!details) {
     elements.conversationSearchBtn.disabled = true;
@@ -839,6 +893,15 @@ function renderConversation() {
         elements.messages.appendChild(divider);
         currentGroup = null;
         currentGroupCount = 0;
+      }
+      if (message.kind === "system") {
+        const eventNode = document.createElement("div");
+        eventNode.className = "system-event";
+        eventNode.innerHTML = `<span class="system-event-pill">${escapeHtml(message.text)}</span>`;
+        elements.messages.appendChild(eventNode);
+        currentGroup = null;
+        currentGroupCount = 0;
+        return;
       }
       const previousMessage = index > 0 ? messages[index - 1] : null;
       const sameSenderAsPrevious = previousMessage?.senderId === message.senderId;
@@ -965,6 +1028,17 @@ function renderPinnedBanner() {
       </div>
     </button>
   `;
+}
+
+function renderMentionJumpButton() {
+  const marker = state.mentionJumpMarker;
+  if (!marker || marker.conversationId !== state.currentConversationId) {
+    elements.mentionJumpBtn.classList.add("hidden");
+    elements.mentionJumpLabel.textContent = "Ir para a mencao";
+    return;
+  }
+  elements.mentionJumpLabel.textContent = marker.count > 1 ? `${marker.count} mencoes` : "Ir para a mencao";
+  elements.mentionJumpBtn.classList.remove("hidden");
 }
 
 function renderMemberRow(details, member) {
@@ -1601,7 +1675,9 @@ function selectConversation(conversationId) {
   if (!conversationId) {
     return;
   }
+  flushPendingDraftSave();
   state.unreadMarker = getUnreadMarkerForConversation(conversationId);
+  state.mentionJumpMarker = getMentionJumpMarkerForConversation(conversationId);
   const firstUnreadMessageId = state.unreadMarker?.messageId || "";
   state.selectionMode = false;
   state.selectedMessageIds = [];
@@ -1635,10 +1711,6 @@ function getMentionContext() {
   if (!state.currentConversationId) {
     return null;
   }
-  const details = getConversationDetails(currentUser.id, state.currentConversationId);
-  if (!details || details.type !== "group") {
-    return null;
-  }
   const cursorStart = elements.composer.selectionStart ?? 0;
   const cursorEnd = elements.composer.selectionEnd ?? cursorStart;
   if (cursorStart !== cursorEnd) {
@@ -1647,6 +1719,10 @@ function getMentionContext() {
   const beforeCursor = elements.composer.value.slice(0, cursorStart);
   const match = beforeCursor.match(/(^|[\s(])@([a-z0-9._-]*)$/i);
   if (!match) {
+    return null;
+  }
+  const details = getConversationDetails(currentUser.id, state.currentConversationId);
+  if (!details || details.type !== "group") {
     return null;
   }
   return {
@@ -1782,7 +1858,7 @@ function handleComposerInput() {
     return;
   }
   syncMentionSuggestions();
-  saveDraft(currentUser.id, state.currentConversationId, elements.composer.value);
+  scheduleDraftSave(state.currentConversationId, elements.composer.value);
   elements.draftStatus.textContent = "Draft salvo";
   if (!userSettings.showTypingIndicator) {
     elements.typingIndicator.classList.add("hidden");
@@ -1859,6 +1935,7 @@ function handleSend(event) {
   elements.composer.value = "";
   closeMentionPanel();
   autoResizeComposer(true);
+  flushPendingDraftSave();
   saveDraft(currentUser.id, state.currentConversationId, "");
   clearReply();
   clearPending();
@@ -2172,10 +2249,11 @@ function handleMessageClick(event) {
     if (article.classList.contains("mine") === false) {
       return;
     }
-    if (confirm("Apagar esta mensagem?")) {
-      deleteMessage(currentUser.id, messageId, "everyone");
-      renderAll();
+    const message = getMessagesForConversation(currentUser.id, state.currentConversationId).find((item) => item.id === messageId);
+    if (!message) {
+      return;
     }
+    openDeleteMessagesModal([message]);
     return;
   }
   if (action === "pin") {
@@ -2279,6 +2357,16 @@ function handlePinnedBannerClick(event) {
   focusMessage(button.dataset.messageId);
 }
 
+function handleMentionJump() {
+  const marker = state.mentionJumpMarker;
+  if (!marker || marker.conversationId !== state.currentConversationId) {
+    return;
+  }
+  focusMessage(marker.messageId);
+  state.mentionJumpMarker = null;
+  renderMentionJumpButton();
+}
+
 function toggleConversationSearch() {
   elements.conversationSearchPanel.classList.toggle("hidden");
   if (!elements.conversationSearchPanel.classList.contains("hidden")) {
@@ -2326,11 +2414,17 @@ function handleOuterClick(event) {
   }
 }
 
-function handleLogout() {
+async function handleLogout() {
+  flushPendingDraftSave();
   closeCameraPreview();
   cleanupRecordingMeter();
   stopRecordingStream();
   revokeAllPendingAudioPreviewUrls();
+  try {
+    await signOutRemoteUser();
+  } catch (error) {
+    console.error(error);
+  }
   logoutUser();
   window.location.href = "index.html";
 }
@@ -2575,9 +2669,14 @@ function openFormModal(config) {
 
 function buildMemberPicker(users) {
   return users.map((user) => `
-    <label class="picker-row" data-member-row="${user.id}">
-      <input type="checkbox" name="member" value="${user.id}">
-      <span>${escapeHtml(user.name)} <small>@${escapeHtml(user.username)}</small></span>
+    <label class="picker-row picker-row-choice" data-member-row="${user.id}">
+      <input class="picker-row-input" type="checkbox" name="member" value="${user.id}">
+      <span class="picker-row-indicator" aria-hidden="true"></span>
+      ${renderAvatarMarkup(user, "member-avatar picker-avatar", user.name)}
+      <span class="picker-row-copy">
+        <strong>${escapeHtml(user.name)}</strong>
+        <small>@${escapeHtml(user.username)}</small>
+      </span>
     </label>
   `).join("");
 }
@@ -2745,6 +2844,9 @@ function getUnreadMarkerForConversation(conversationId) {
     return null;
   }
   const unreadMessages = getMessagesForConversation(currentUser.id, conversationId).filter((message) => {
+    if (message.kind === "system") {
+      return false;
+    }
     if (message.senderId === currentUser.id) {
       return false;
     }
@@ -2757,6 +2859,26 @@ function getUnreadMarkerForConversation(conversationId) {
     conversationId,
     messageId: unreadMessages[0].id,
     count: unreadMessages.length
+  };
+}
+
+function getMentionJumpMarkerForConversation(conversationId) {
+  if (!conversationId) {
+    return null;
+  }
+  const mentionMessages = getMessagesForConversation(currentUser.id, conversationId).filter((message) => {
+    if (message.kind === "system" || message.senderId === currentUser.id) {
+      return false;
+    }
+    return message.mentionsCurrentUser && (message.receipts?.[currentUser.id] || "sent") !== "read";
+  });
+  if (!mentionMessages.length) {
+    return null;
+  }
+  return {
+    conversationId,
+    messageId: mentionMessages[0].id,
+    count: mentionMessages.length
   };
 }
 

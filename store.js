@@ -61,7 +61,7 @@ const ASSISTANT_USER = {
   password: "__assistant__",
   avatar: "IA",
   photo: "",
-  bio: "Guia do Atlas: explica conversas, grupos, audio, perfil, privacidade e atalhos.",
+  bio: "Guia do Atlas: explica contatos, grupos, mencoes, audio, privacidade, atalhos e fluxo mobile.",
   kind: "assistant",
   lastSeenAt: Date.now(),
   contactIds: [],
@@ -220,6 +220,7 @@ function normalizeMessage(message, index, threadMap) {
   const attachments = message.attachments || {};
   const reactions = message.reactions && typeof message.reactions === "object" ? message.reactions : {};
   const receipts = message.receipts && typeof message.receipts === "object" ? { ...message.receipts } : {};
+  const kind = message.kind === "system" ? "system" : "message";
   members.forEach((memberId) => {
     if (!receipts[memberId]) {
       receipts[memberId] = memberId === String(message.senderId || "") ? "read" : "sent";
@@ -229,6 +230,7 @@ function normalizeMessage(message, index, threadMap) {
     id: String(message.id || `m-${index + 1}`),
     threadId: String(message.threadId || ""),
     senderId: String(message.senderId || ""),
+    kind,
     text: String(message.text || ""),
     createdAt: Number.isFinite(message.createdAt) ? message.createdAt : Date.now() - index * 60000,
     editedAt: Number.isFinite(message.editedAt) ? message.editedAt : null,
@@ -261,6 +263,31 @@ function extractMentionedUserIds(state, thread, senderId, text) {
   return state.users
     .filter((user) => usernames.has(sanitizeUsername(user.username)) && thread.memberIds.includes(user.id) && user.id !== senderId)
     .map((user) => user.id);
+}
+
+function buildSystemReceipts(memberIds) {
+  return Object.fromEntries(uniqueStrings(memberIds).map((memberId) => [memberId, "read"]));
+}
+
+function appendSystemMessage(state, thread, actorId, text) {
+  if (!thread || thread.type !== "group") {
+    return null;
+  }
+  const content = String(text || "").trim();
+  if (!content) {
+    return null;
+  }
+  const message = normalizeMessage({
+    id: uid("m-system"),
+    threadId: thread.id,
+    senderId: actorId,
+    kind: "system",
+    text: content,
+    createdAt: Date.now(),
+    receipts: buildSystemReceipts(thread.memberIds)
+  }, state.messages.length, new Map(state.threads.map((item) => [item.id, item])));
+  state.messages.push(message);
+  return message;
 }
 
 function normalizeState(input) {
@@ -429,33 +456,45 @@ function isAssistantUser(user) {
 function buildAssistantReplyText(text) {
   const normalized = String(text || "").trim().toLowerCase();
   if (!normalized) {
-    return "Posso te orientar por aqui. Pergunte sobre grupos, adicionar contato, audio com waveform, favoritos, fixar conversa, arquivar, limpar historico ou configuracoes.";
+    return "Posso te orientar por aqui. Pergunte sobre grupos, adicionar contato, mencoes com @, audio com waveform, favoritos, fixar conversa, arquivar, limpar historico, configuracoes ou atalhos mobile.";
   }
   if (/(grupo|admin|membro)/.test(normalized)) {
-    return "Grupos sao gerenciados no painel de detalhes. Admin pode editar grupo, adicionar membros, promover admin e remover pessoas com confirmacao.";
+    return "Grupos sao gerenciados no painel de detalhes. Admin pode editar grupo, trocar foto, adicionar membros, promover admin, remover cargo e retirar pessoas com confirmacao. Essas mudancas tambem aparecem como atualizacao dentro do chat.";
   }
   if (/(contato|usuario|adicionar|novo chat|\+)/.test(normalized)) {
     return "No botao + da sidebar voce pode adicionar contato ou criar grupo. Para adicionar contato, basta buscar pelo usuario sem @ e selecionar a conta.";
   }
+  if (/(menc|marc|@|citar)/.test(normalized)) {
+    return "Em grupos, digite @ para abrir a lista de participantes. Ao marcar alguem, a conversa ganha destaque ate a pessoa visualizar. Se voce foi marcado, o botao com seta acima do composer leva direto para a primeira mencao pendente.";
+  }
   if (/(fix|pin|arquiv|histor)/.test(normalized)) {
     return "No menu da conversa voce consegue fixar no topo, arquivar para tirar da lista principal e limpar o historico so para a sua conta.";
+  }
+  if (/(apag|excluir|remov.*mensagem)/.test(normalized)) {
+    return "Ao apagar mensagem pelo menu ou pela selecao multipla, voce pode escolher entre apagar so para voce ou apagar para todos quando a mensagem for sua.";
   }
   if (/(favorit|estrela|reag)/.test(normalized)) {
     return "Mensagens podem receber uma unica reacao por usuario. Favoritos ficam marcados com estrela e podem ser consultados em Configuracoes.";
   }
   if (/(audio|voz|microfone|onda|wave)/.test(normalized)) {
-    return "Para gravar audio, use o microfone no composer. Enquanto grava, a interface mostra a waveform em tempo real; depois voce pode ouvir o preview antes de enviar.";
+    return "Para gravar audio, use o microfone no composer. Enquanto grava, a interface mostra a waveform em tempo real; depois voce pode ouvir o preview, controlar a velocidade e enviar.";
+  }
+  if (/(camera|foto na hora|imagem)/.test(normalized)) {
+    return "Ao lado do envio de imagem existe a camera. No celular ela pode abrir captura direta; no app tambem existe preview da camera antes de anexar a foto.";
   }
   if (/(tema|privacidade|config|perfil|foto)/.test(normalized)) {
-    return "Em Configuracoes voce ajusta tema, foto, privacidade, leitura, comportamento visual, favoritos, pins e preferencias das conversas.";
+    return "Em Configuracoes voce ajusta tema, foto, privacidade, leitura, comportamento visual, tamanho dos baloes, favoritos, pins e preferencias das conversas.";
   }
-  if (/(respost|reply|mensagem|pular|buscar)/.test(normalized)) {
-    return "Voce pode responder mensagens, clicar na resposta para pular ate a original, buscar dentro da conversa e abrir detalhes do contato ou do grupo.";
+  if (/(respost|reply|mensagem|pular|buscar|privado)/.test(normalized)) {
+    return "Voce pode responder mensagens, clicar na resposta para pular ate a original, buscar dentro da conversa e, em grupos, tocar numa @mencao para abrir o chat privado da pessoa.";
+  }
+  if (/(mobile|celular|voltar|tela cheia)/.test(normalized)) {
+    return "No celular a lista de conversas vira a tela principal. Ao abrir um chat, a conversa ocupa a tela toda e o botao de voltar leva para a lista novamente.";
   }
   if (/(^|\b)(oi|ola|hello|ajuda)(\b|$)/.test(normalized)) {
-    return "Oi. Eu sou a IA do Atlas. Posso te explicar conversas privadas, grupos, contatos, audio, configuracoes, atalhos e o fluxo do sistema.";
+    return "Oi. Eu sou a IA do Atlas. Posso te explicar conversas privadas, grupos, contatos, mencoes, audio, configuracoes, atalhos e o fluxo mobile do sistema.";
   }
-  return "Eu consigo te orientar sobre contatos, conversas privadas, grupos, audio, pins, arquivamento, favoritos, privacidade e configuracoes da interface.";
+  return "Eu consigo te orientar sobre contatos, conversas privadas, grupos, mencoes, audio, pins, arquivamento, favoritos, privacidade, camera e configuracoes da interface.";
 }
 
 function seedAssistantConversation(state, userId) {
@@ -503,7 +542,7 @@ function seedAssistantConversation(state, userId) {
       id: uid("m"),
       threadId: thread.id,
       senderId: ASSISTANT_USER_ID,
-      text: "Pergunte, por exemplo: como crio um grupo, onde ficam os favoritos, como fixo ou arquivo uma conversa e onde altero perfil e privacidade.",
+      text: "Pergunte, por exemplo: como crio um grupo, como funciona a mencao com @, onde ficam os favoritos, como fixo ou arquivo uma conversa e onde altero perfil e privacidade.",
       createdAt: Date.now(),
       editedAt: null,
       replyTo: null,
@@ -517,7 +556,7 @@ function seedAssistantConversation(state, userId) {
       id: uid("m"),
       threadId: thread.id,
       senderId: ASSISTANT_USER_ID,
-      text: "Tambem posso te orientar sobre adicionar contatos, responder mensagens, gravar audio com waveform, mudar tema e organizar grupos.",
+      text: "Tambem posso te orientar sobre adicionar contatos, responder mensagens, abrir o privado pela mencao, gravar audio com waveform, usar a camera, mudar tema e organizar grupos.",
       createdAt: Date.now() + 1,
       editedAt: null,
       replyTo: null,
@@ -572,7 +611,13 @@ function getUnreadCountForThread(state, userId, threadId) {
   if (!thread) {
     return 0;
   }
-  return state.messages.filter((message) => message.threadId === threadId && isMessageVisibleForUser(thread, userId, message) && message.senderId !== userId && message.receipts[userId] !== "read").length;
+  return state.messages.filter((message) =>
+    message.threadId === threadId
+    && message.kind !== "system"
+    && isMessageVisibleForUser(thread, userId, message)
+    && message.senderId !== userId
+    && message.receipts[userId] !== "read"
+  ).length;
 }
 
 function getUnreadMentionCountForThread(state, userId, threadId) {
@@ -742,6 +787,48 @@ export function redirectIfAuthenticated(redirectUrl = "chat.html") {
   if (getCurrentUser()) {
     window.location.href = redirectUrl;
   }
+}
+
+export function upsertRemoteSessionUser(profile, authUser = null) {
+  return withState((state) => {
+    if (!profile?.id) {
+      return { ok: false, error: "Perfil remoto ausente" };
+    }
+    const email = String(authUser?.email || profile.email || `${profile.username || "user"}@atlas.local`).trim().toLowerCase();
+    const nextPayload = {
+      id: profile.id,
+      name: String(profile.name || authUser?.user_metadata?.name || "Conta"),
+      username: String(profile.username || authUser?.user_metadata?.username || email.split("@")[0] || "user"),
+      email,
+      password: "__supabase__",
+      avatar: buildInitials(profile.name || authUser?.user_metadata?.name || "Conta"),
+      photo: typeof profile.avatarUrl === "string" ? profile.avatarUrl : "",
+      bio: String(profile.bio || "Member"),
+      kind: "user",
+      lastSeenAt: Date.now(),
+      contactIds: [ASSISTANT_USER_ID],
+      pinnedConversationIds: [],
+      contactEdits: {}
+    };
+    const currentIndex = state.users.findIndex((user) => user.id === profile.id);
+    if (currentIndex >= 0) {
+      const current = state.users[currentIndex];
+      state.users[currentIndex] = normalizeUser({
+        ...current,
+        ...nextPayload,
+        contactIds: uniqueStrings([...(current.contactIds || []), ASSISTANT_USER_ID]),
+        pinnedConversationIds: current.pinnedConversationIds || [],
+        contactEdits: current.contactEdits || {}
+      }, currentIndex);
+    } else {
+      state.users.push(normalizeUser(nextPayload, state.users.length));
+    }
+    ensureSettingsRecord(state, profile.id);
+    ensureDraftRecord(state, profile.id);
+    seedAssistantConversation(state, profile.id);
+    localStorage.setItem(SESSION_KEY, profile.id);
+    return { ok: true, user: findUser(state, profile.id) };
+  });
 }
 
 export function loginUser(identifier, password) {
@@ -1526,6 +1613,7 @@ export function updateUserProfile(userId, patch) {
 
 export function createGroup(userId, payload) {
   return withState((state) => {
+    const actor = findUser(state, userId);
     const title = String(payload.title || "").trim();
     if (!title) {
       return { ok: false, error: "Defina um nome para o grupo" };
@@ -1548,6 +1636,7 @@ export function createGroup(userId, payload) {
       archivedBy: []
     }, state.threads.length);
     state.threads.push(thread);
+    appendSystemMessage(state, thread, userId, `${actor?.name || "Conta"} criou o grupo.`);
     return { ok: true, thread };
   });
 }
@@ -1558,25 +1647,47 @@ export function updateGroup(userId, threadId, patch) {
     if (!thread || thread.type !== "group" || !thread.admins.includes(userId)) {
       return { ok: false, error: "Sem permissao" };
     }
+    const actor = findUser(state, userId);
     const previousTitle = thread.title;
+    let hasVisualChange = false;
     if (typeof patch.title === "string") {
       const nextTitle = patch.title.trim() || thread.title;
+      if (nextTitle !== thread.title) {
+        hasVisualChange = true;
+      }
       thread.title = nextTitle;
       if (!patch.avatar && (!thread.avatar || thread.avatar === buildInitials(previousTitle))) {
         thread.avatar = buildInitials(nextTitle);
       }
     }
     if (typeof patch.description === "string") {
-      thread.description = patch.description.trim();
+      const nextDescription = patch.description.trim();
+      if (nextDescription !== thread.description) {
+        hasVisualChange = true;
+      }
+      thread.description = nextDescription;
     }
     if (typeof patch.avatar === "string") {
-      thread.avatar = patch.avatar.trim().slice(0, 2).toUpperCase();
+      const nextAvatar = patch.avatar.trim().slice(0, 2).toUpperCase();
+      if (nextAvatar !== thread.avatar) {
+        hasVisualChange = true;
+      }
+      thread.avatar = nextAvatar;
     }
     if (patch.clearPhoto) {
+      if (thread.photo) {
+        hasVisualChange = true;
+      }
       thread.photo = "";
     }
     if (typeof patch.photo === "string") {
+      if (patch.photo !== thread.photo) {
+        hasVisualChange = true;
+      }
       thread.photo = patch.photo;
+    }
+    if (hasVisualChange) {
+      appendSystemMessage(state, thread, userId, `${actor?.name || "Conta"} atualizou as informacoes do grupo.`);
     }
     return { ok: true, thread };
   });
@@ -1588,8 +1699,18 @@ export function addGroupMembers(userId, threadId, memberIds) {
     if (!thread || thread.type !== "group" || !thread.admins.includes(userId)) {
       return { ok: false, error: "Sem permissao" };
     }
+    const actor = findUser(state, userId);
+    const currentMembers = new Set(thread.memberIds);
     const validIds = memberIds.filter((memberId) => findUser(state, memberId));
+    const addedIds = validIds.filter((memberId) => !currentMembers.has(memberId));
     thread.memberIds = [...new Set([...thread.memberIds, ...validIds])];
+    if (addedIds.length) {
+      const names = addedIds
+        .map((memberId) => findUser(state, memberId)?.name)
+        .filter(Boolean)
+        .join(", ");
+      appendSystemMessage(state, thread, userId, `${actor?.name || "Conta"} adicionou ${names} ao grupo.`);
+    }
     return { ok: true, thread };
   });
 }
@@ -1600,13 +1721,17 @@ export function toggleGroupAdmin(userId, threadId, targetUserId) {
     if (!thread || thread.type !== "group" || !thread.admins.includes(userId) || !thread.memberIds.includes(targetUserId)) {
       return { ok: false, error: "Sem permissao" };
     }
+    const actor = findUser(state, userId);
+    const target = findUser(state, targetUserId);
     if (thread.admins.includes(targetUserId)) {
       if (thread.admins.length === 1) {
         return { ok: false, error: "O grupo precisa de pelo menos um admin" };
       }
       thread.admins = thread.admins.filter((adminId) => adminId !== targetUserId);
+      appendSystemMessage(state, thread, userId, `${actor?.name || "Conta"} removeu ${target?.name || "um membro"} da administracao do grupo.`);
     } else {
       thread.admins.push(targetUserId);
+      appendSystemMessage(state, thread, userId, `${actor?.name || "Conta"} promoveu ${target?.name || "um membro"} para admin.`);
     }
     return { ok: true, thread };
   });
@@ -1625,6 +1750,8 @@ export function removeGroupMember(userId, threadId, targetUserId) {
     if (!thread.memberIds.includes(targetUserId)) {
       return { ok: false, error: "Membro nao encontrado" };
     }
+    const actor = findUser(state, userId);
+    const target = findUser(state, targetUserId);
     thread.memberIds = thread.memberIds.filter((memberId) => memberId !== targetUserId);
     thread.admins = thread.admins.filter((adminId) => adminId !== targetUserId);
     if (!thread.admins.length && thread.memberIds.length) {
@@ -1635,6 +1762,10 @@ export function removeGroupMember(userId, threadId, targetUserId) {
       state.messages = state.messages.filter((message) => message.threadId !== threadId);
       return { ok: true, removedThread: true };
     }
+    const updateText = userId === targetUserId
+      ? `${target?.name || "Um membro"} saiu do grupo.`
+      : `${actor?.name || "Conta"} removeu ${target?.name || "um membro"} do grupo.`;
+    appendSystemMessage(state, thread, userId, updateText);
     return { ok: true, thread };
   });
 }

@@ -146,28 +146,33 @@ alter table public.message_reactions enable row level security;
 alter table public.message_favorites enable row level security;
 alter table public.conversation_pins enable row level security;
 
+drop policy if exists "profiles readable by authenticated users" on public.profiles;
 create policy "profiles readable by authenticated users"
 on public.profiles
 for select
 using (auth.role() = 'authenticated');
 
+drop policy if exists "users update only own profile" on public.profiles;
 create policy "users update only own profile"
 on public.profiles
 for update
 using (auth.uid() = id)
 with check (auth.uid() = id);
 
+drop policy if exists "users read own settings" on public.user_settings;
 create policy "users read own settings"
 on public.user_settings
 for select
 using (auth.uid() = user_id);
 
+drop policy if exists "users update own settings" on public.user_settings;
 create policy "users update own settings"
 on public.user_settings
 for update
 using (auth.uid() = user_id)
 with check (auth.uid() = user_id);
 
+drop policy if exists "members read conversations" on public.conversations;
 create policy "members read conversations"
 on public.conversations
 for select
@@ -179,11 +184,13 @@ using (
   )
 );
 
+drop policy if exists "authenticated create conversations" on public.conversations;
 create policy "authenticated create conversations"
 on public.conversations
 for insert
 with check (auth.uid() = created_by);
 
+drop policy if exists "group admins update conversations" on public.conversations;
 create policy "group admins update conversations"
 on public.conversations
 for update
@@ -204,6 +211,7 @@ with check (
   )
 );
 
+drop policy if exists "members read conversation_members" on public.conversation_members;
 create policy "members read conversation_members"
 on public.conversation_members
 for select
@@ -215,6 +223,7 @@ using (
   )
 );
 
+drop policy if exists "admins manage members" on public.conversation_members;
 create policy "admins manage members"
 on public.conversation_members
 for insert
@@ -228,6 +237,7 @@ with check (
   or auth.uid() = user_id
 );
 
+drop policy if exists "admins update members" on public.conversation_members;
 create policy "admins update members"
 on public.conversation_members
 for update
@@ -248,6 +258,7 @@ with check (
   )
 );
 
+drop policy if exists "admins or self remove member" on public.conversation_members;
 create policy "admins or self remove member"
 on public.conversation_members
 for delete
@@ -261,6 +272,7 @@ using (
   )
 );
 
+drop policy if exists "members read messages" on public.messages;
 create policy "members read messages"
 on public.messages
 for select
@@ -272,6 +284,7 @@ using (
   )
 );
 
+drop policy if exists "members send messages" on public.messages;
 create policy "members send messages"
 on public.messages
 for insert
@@ -284,12 +297,14 @@ with check (
   )
 );
 
+drop policy if exists "authors edit own messages" on public.messages;
 create policy "authors edit own messages"
 on public.messages
 for update
 using (auth.uid() = sender_id)
 with check (auth.uid() = sender_id);
 
+drop policy if exists "members read attachments" on public.message_attachments;
 create policy "members read attachments"
 on public.message_attachments
 for select
@@ -303,6 +318,7 @@ using (
   )
 );
 
+drop policy if exists "senders insert attachments" on public.message_attachments;
 create policy "senders insert attachments"
 on public.message_attachments
 for insert
@@ -314,6 +330,7 @@ with check (
   )
 );
 
+drop policy if exists "members read reactions" on public.message_reactions;
 create policy "members read reactions"
 on public.message_reactions
 for select
@@ -327,28 +344,33 @@ using (
   )
 );
 
+drop policy if exists "users manage own reactions" on public.message_reactions;
 create policy "users manage own reactions"
 on public.message_reactions
 for all
 using (auth.uid() = user_id)
 with check (auth.uid() = user_id);
 
+drop policy if exists "users read own favorites" on public.message_favorites;
 create policy "users read own favorites"
 on public.message_favorites
 for select
 using (auth.uid() = user_id);
 
+drop policy if exists "users manage own favorites" on public.message_favorites;
 create policy "users manage own favorites"
 on public.message_favorites
 for all
 using (auth.uid() = user_id)
 with check (auth.uid() = user_id);
 
+drop policy if exists "users read own pins" on public.conversation_pins;
 create policy "users read own pins"
 on public.conversation_pins
 for select
 using (auth.uid() = user_id);
 
+drop policy if exists "users manage own pins" on public.conversation_pins;
 create policy "users manage own pins"
 on public.conversation_pins
 for all

@@ -22,15 +22,14 @@
 
       <div class="auth-copy">
         <h1>Chat com login, contatos editaveis e grupos com admin.</h1>
-        <p>Fluxo local completo para testar contas diferentes, troca de mensagens, leitura e gestao de membros. Novas contas comecam limpas e recebem apenas o contato IA como guia inicial.</p>
+        <p>Cadastro e login agora usam Supabase. Novas contas comecam limpas e recebem apenas o contato IA como guia inicial.</p>
       </div>
 
       <div class="auth-demo">
-        <div class="card-kicker">Contas demo</div>
-        <div class="demo-item"><strong>gustavo</strong><span>demo123</span></div>
-        <div class="demo-item"><strong>ana</strong><span>demo123</span></div>
-        <div class="demo-item"><strong>bruno</strong><span>demo123</span></div>
-        <div class="demo-item"><strong>clara</strong><span>demo123</span></div>
+        <div class="card-kicker">Auth Supabase</div>
+        <div class="demo-item"><strong>Login</strong><span>Use email + senha</span></div>
+        <div class="demo-item"><strong>Cadastro</strong><span>Cria perfil no banco</span></div>
+        <div class="demo-item"><strong>Sessao</strong><span>Persistida no navegador</span></div>
       </div>
     </section>
 
@@ -42,8 +41,8 @@
 
       <form id="login-form" class="auth-form">
         <label class="field">
-          <span>Usuario ou email</span>
-          <input id="login-identifier" type="text" placeholder="gustavo ou gustavo@atlas.local" required>
+          <span>Email</span>
+          <input id="login-identifier" type="email" placeholder="voce@email.com" required>
         </label>
         <label class="field">
           <span>Senha</span>
