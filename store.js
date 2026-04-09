@@ -463,7 +463,7 @@ function isAssistantUser(user) {
 function buildAssistantReplyText(text) {
   const normalized = String(text || "").trim().toLowerCase();
   if (!normalized) {
-    return "Posso te orientar por aqui. Pergunte sobre grupos, adicionar contato, mencoes com @, audio com waveform, favoritos, fixar conversa, arquivar, limpar historico, configuracoes ou atalhos mobile.";
+    return "Posso te orientar sobre grupos, contatos, mencoes com @, audio, resposta por gesto, privacidade, configuracoes, sincronizacao entre dispositivos e atalhos do mobile.";
   }
   if (/(grupo|admin|membro)/.test(normalized)) {
     return "Grupos sao gerenciados no painel de detalhes. Admin pode editar grupo, trocar foto, adicionar membros, promover admin, remover cargo e retirar pessoas com confirmacao. Essas mudancas tambem aparecem como atualizacao dentro do chat.";
@@ -484,7 +484,7 @@ function buildAssistantReplyText(text) {
     return "Mensagens podem receber uma unica reacao por usuario. Favoritos ficam marcados com estrela e podem ser consultados em Configuracoes.";
   }
   if (/(audio|voz|microfone|onda|wave)/.test(normalized)) {
-    return "Para gravar audio, use o microfone no composer. Enquanto grava, a interface mostra a waveform em tempo real; depois voce pode ouvir o preview, controlar a velocidade e enviar.";
+    return "Para gravar audio, use o microfone no composer. O preview fica no proprio chat com waveform, controle de velocidade e envio direto pelo botao principal.";
   }
   if (/(camera|foto na hora|imagem)/.test(normalized)) {
     return "Ao lado do envio de imagem existe a camera. No celular ela pode abrir captura direta; no app tambem existe preview da camera antes de anexar a foto.";
@@ -496,12 +496,12 @@ function buildAssistantReplyText(text) {
     return "Voce pode responder mensagens, clicar na resposta para pular ate a original, buscar dentro da conversa e, em grupos, tocar numa @mencao para abrir o chat privado da pessoa.";
   }
   if (/(mobile|celular|voltar|tela cheia)/.test(normalized)) {
-    return "No celular a lista de conversas vira a tela principal. Ao abrir um chat, a conversa ocupa a tela toda e o botao de voltar leva para a lista novamente.";
+    return "No celular a lista de conversas vira a tela principal. Ao abrir um chat, a conversa ocupa a tela toda, existe botao de voltar e agora tambem um atalho para voltar direto ao fim quando voce sobe o historico.";
   }
   if (/(^|\b)(oi|ola|hello|ajuda)(\b|$)/.test(normalized)) {
-    return "Oi. Eu sou a IA do Atlas. Posso te explicar conversas privadas, grupos, contatos, mencoes, audio, configuracoes, atalhos e o fluxo mobile do sistema.";
+    return "Oi. Eu sou a IA do Atlas. Posso te explicar conversas privadas, grupos, contatos, mencoes, audio, sincronizacao, configuracoes e atalhos do sistema.";
   }
-  return "Eu consigo te orientar sobre contatos, conversas privadas, grupos, mencoes, audio, pins, arquivamento, favoritos, privacidade, camera e configuracoes da interface.";
+  return "Eu consigo te orientar sobre contatos, conversas privadas, grupos, mencoes, audio, pins, arquivamento, favoritos, privacidade, camera, sincronizacao e configuracoes da interface.";
 }
 
 function seedAssistantConversation(state, userId) {
@@ -563,7 +563,7 @@ function seedAssistantConversation(state, userId) {
       id: uid("m"),
       threadId: thread.id,
       senderId: ASSISTANT_USER_ID,
-      text: "Tambem posso te orientar sobre adicionar contatos, responder mensagens, abrir o privado pela mencao, gravar audio com waveform, usar a camera, mudar tema e organizar grupos.",
+      text: "Tambem posso te orientar sobre adicionar contatos, responder por gesto, voltar ao fim da conversa, gravar audio, usar a camera, sincronizar entre dispositivos e organizar grupos.",
       createdAt: Date.now() + 1,
       editedAt: null,
       replyTo: null,

@@ -83,6 +83,9 @@ import { supabase } from "./src/lib/supabaseClient.js";
 
 const currentUser = requireSession("index.html");
 let userSettings = currentUser ? getSettings(currentUser.id) : null;
+const CHAT_CACHE_VERSION = "v2";
+const CHAT_CACHE_TTL = 1000 * 60 * 8;
+const REMOTE_SYNC_MIN_INTERVAL = 3500;
 
 const REACTIONS = [
   { token: "like", label: "👍" },
@@ -164,6 +167,7 @@ const elements = {
   pinnedBanner: document.getElementById("pinned-banner"),
   mentionJumpBtn: document.getElementById("mention-jump-btn"),
   mentionJumpLabel: document.getElementById("mention-jump-label"),
+  scrollBottomBtn: document.getElementById("scroll-bottom-btn"),
   selectionBar: document.getElementById("selection-bar"),
   selectionCount: document.getElementById("selection-count"),
   selectionHint: document.getElementById("selection-hint"),
@@ -212,7 +216,9 @@ const elements = {
   cameraCaptureBtn: document.getElementById("camera-capture-btn"),
   cameraFlipBtn: document.getElementById("camera-flip-btn"),
   cameraFallbackBtn: document.getElementById("camera-fallback-btn"),
-  undoToast: document.getElementById("undo-toast")
+  undoToast: document.getElementById("undo-toast"),
+  bootOverlay: document.getElementById("boot-overlay"),
+  bootStatus: document.getElementById("boot-status")
 };
 
 const state = {
@@ -262,6 +268,7 @@ const state = {
   remoteSyncViewportLock: null,
   stickFeedToBottomUntil: 0,
   remoteSyncMutedUntil: 0,
+  lastRemoteSyncAt: 0,
   realtimeChannel: null,
   skipNextMessageClick: false,
   messageGesture: null
@@ -273,6 +280,7 @@ async function init() {
   if (!currentUser) {
     return;
   }
+  setBootStatus("Validando a sessao...");
   const remoteSession = await getRemoteSession().catch(() => null);
   if (!remoteSession?.user) {
     logoutUser();
@@ -280,12 +288,18 @@ async function init() {
     return;
   }
   await ensureStore();
+  const hydratedFromCache = hydrateRemoteChatCache(currentUser.id);
+  setBootStatus(hydratedFromCache ? "Atualizando conversas..." : "Carregando conversas...");
   await syncRemoteProfile(remoteSession.user);
-  await syncRemoteChatData({ rerender: false });
   syncUserSettings();
   markAllDeliveredForUser(currentUser.id);
   decorateStaticIcons();
   bindEvents();
+  if (hydratedFromCache) {
+    selectInitialConversation();
+    renderAll();
+  }
+  await syncRemoteChatData({ rerender: false, preserveViewport: false });
   selectInitialConversation();
   renderAll();
   if (!focusMessageFromUrl()) {
@@ -293,6 +307,57 @@ async function init() {
   }
   state.pendingOpenMessageId = "";
   setupRealtimeSync();
+  hideBootOverlay();
+}
+
+function setBootStatus(message) {
+  if (elements.bootStatus) {
+    elements.bootStatus.textContent = message;
+  }
+}
+
+function hideBootOverlay() {
+  elements.bootOverlay?.classList.add("hidden");
+}
+
+function getRemoteChatCacheKey(userId) {
+  return `atlas-chat-remote-cache:${CHAT_CACHE_VERSION}:${userId}`;
+}
+
+function hydrateRemoteChatCache(userId) {
+  if (!userId) {
+    return false;
+  }
+  try {
+    const raw = localStorage.getItem(getRemoteChatCacheKey(userId));
+    if (!raw) {
+      return false;
+    }
+    const parsed = JSON.parse(raw);
+    if (!parsed?.snapshot || !parsed?.savedAt || Date.now() - parsed.savedAt > CHAT_CACHE_TTL) {
+      localStorage.removeItem(getRemoteChatCacheKey(userId));
+      return false;
+    }
+    applyRemoteChatSnapshot(userId, parsed.snapshot);
+    return true;
+  } catch (error) {
+    console.error(error);
+    return false;
+  }
+}
+
+function persistRemoteChatCache(userId, snapshot) {
+  if (!userId || !snapshot) {
+    return;
+  }
+  try {
+    localStorage.setItem(getRemoteChatCacheKey(userId), JSON.stringify({
+      savedAt: Date.now(),
+      snapshot
+    }));
+  } catch (error) {
+    console.error(error);
+  }
 }
 
 async function syncRemoteProfile(authUser) {
@@ -339,7 +404,7 @@ async function syncRemoteChatData(options = {}) {
       listMyHiddenMessageIds(),
       listMyPinnedMessages()
     ]);
-    applyRemoteChatSnapshot(currentUser.id, {
+    const snapshot = {
       contacts,
       conversations: memberships,
       membersByConversation: Object.fromEntries(memberRows),
@@ -349,7 +414,10 @@ async function syncRemoteChatData(options = {}) {
       pinnedMessageIdsByConversation: Object.fromEntries(
         (pinnedMessages || []).map((row) => [row.conversation_id, row.message_id])
       )
-    });
+    };
+    applyRemoteChatSnapshot(currentUser.id, snapshot);
+    persistRemoteChatCache(currentUser.id, snapshot);
+    state.lastRemoteSyncAt = Date.now();
     syncConversationSelection();
     refreshCurrentConversationMarkers();
     syncOpenConversationReadState();
@@ -417,7 +485,7 @@ function setupRealtimeSync() {
     );
   });
   channel.subscribe((status) => {
-    if (status === "SUBSCRIBED") {
+    if (status === "SUBSCRIBED" && Date.now() - state.lastRemoteSyncAt >= REMOTE_SYNC_MIN_INTERVAL) {
       queueRemoteChatSync(0);
     }
   });
@@ -489,9 +557,12 @@ function restoreFeedScrollState(snapshot) {
   const maxScrollTop = Math.max(0, elements.messages.scrollHeight - elements.messages.clientHeight);
   elements.messages.scrollTop = Math.min(snapshot.scrollTop, maxScrollTop);
   if (Math.abs(elements.messages.scrollTop - snapshot.scrollTop) <= 2) {
+    renderScrollBottomButton();
     return true;
   }
-  return restoreFeedViewportAnchor(snapshot.anchor);
+  const restored = restoreFeedViewportAnchor(snapshot.anchor);
+  renderScrollBottomButton();
+  return restored;
 }
 
 function requestFeedStickToBottom(duration = 2600) {
@@ -582,6 +653,7 @@ function decorateStaticIcons() {
   elements.detailsBtn.innerHTML = ICONS.info;
   elements.conversationMenuBtn.innerHTML = ICONS.more;
   elements.mentionJumpBtn.querySelector(".mention-jump-icon").innerHTML = ICONS.arrowUp;
+  elements.scrollBottomBtn.innerHTML = '<i class="fa-solid fa-arrow-down" aria-hidden="true"></i>';
   elements.mobileChatBackBtn.innerHTML = ICONS.arrowLeft;
   elements.selectionCopyBtn.innerHTML = ICONS.copy;
   elements.selectionFavoriteBtn.innerHTML = ICONS.star;
@@ -636,6 +708,7 @@ function bindEvents() {
   document.getElementById("drawer-close").addEventListener("click", closeDetailsDrawer);
   elements.pinnedBanner.addEventListener("click", handlePinnedBannerClick);
   elements.mentionJumpBtn.addEventListener("click", handleMentionJump);
+  elements.scrollBottomBtn.addEventListener("click", handleScrollBottomClick);
   elements.messages.addEventListener("click", handleMessageClick);
   elements.drawerBody.addEventListener("click", handleDrawerClick);
   elements.selectionCopyBtn.addEventListener("click", handleSelectionCopy);
@@ -794,13 +867,16 @@ function handleViewportChange() {
 
 function handleMessageFeedScroll() {
   if (!state.currentConversationId) {
+    renderScrollBottomButton();
     return;
   }
   if (isFeedNearBottom(36)) {
     requestFeedStickToBottom(2200);
+    renderScrollBottomButton();
     return;
   }
   releaseFeedStickToBottom();
+  renderScrollBottomButton();
 }
 
 function toggleDetailsDrawer() {
@@ -1255,6 +1331,7 @@ function renderConversation() {
     elements.composerForm.classList.add("hidden");
     setComposerEnabled(false);
     autoResizeComposer(true);
+    renderScrollBottomButton();
     return;
   }
   elements.conversationSearchBtn.disabled = false;
@@ -1365,6 +1442,7 @@ function renderConversation() {
   renderAttachmentPreview();
   renderConversationSearch();
   elements.typingIndicator.classList.toggle("hidden", !userSettings.showTypingIndicator);
+  window.requestAnimationFrame(renderScrollBottomButton);
 }
 
 function renderDrawer() {
@@ -1439,6 +1517,22 @@ function renderMentionJumpButton() {
   }
   elements.mentionJumpLabel.textContent = marker.count > 1 ? `${marker.count} mencoes` : "Ir para a mencao";
   elements.mentionJumpBtn.classList.remove("hidden");
+}
+
+function renderScrollBottomButton() {
+  if (!elements.scrollBottomBtn) {
+    return;
+  }
+  const hasConversation = Boolean(state.currentConversationId);
+  const hasMessages = Boolean(elements.messages?.querySelector(".message"));
+  const shouldShow = hasConversation && hasMessages && !isFeedNearBottom(120);
+  elements.scrollBottomBtn.classList.toggle("hidden", !shouldShow);
+}
+
+function handleScrollBottomClick() {
+  requestFeedStickToBottom(3200);
+  scrollMessagesToBottom();
+  renderScrollBottomButton();
 }
 
 function renderMemberRow(details, member) {
@@ -2348,6 +2442,24 @@ async function handleSend(event) {
     return;
   }
   const details = getConversationDetails(currentUser.id, state.currentConversationId);
+  const localPayload = {
+    text,
+    replyTo: state.replyTo,
+    attachments: {
+      images: [...state.pendingImages],
+      docs: [...state.pendingDocs],
+      audio: state.pendingAudio.map((item) => {
+        const audio = normalizeAudioAttachment(item);
+        return {
+          url: audio.url,
+          mimeType: audio.mimeType,
+          duration: audio.duration,
+          waveform: audio.waveform
+        };
+      })
+    }
+  };
+  let optimisticMessage = null;
   requestFeedStickToBottom(2000);
   try {
     if (details?.isRemote) {
@@ -2359,6 +2471,10 @@ async function handleSend(event) {
       if (!conversationId) {
         throw new Error("Conversa remota indisponivel");
       }
+      optimisticMessage = sendMessage(currentUser.id, state.currentConversationId, localPayload);
+      state.remoteSyncMutedUntil = Date.now() + 12000;
+      renderAll();
+      scrollMessagesToBottom();
       const uploaded = await uploadPendingRemoteAttachments(conversationId);
       await sendRemoteMessage({
         conversationId,
@@ -2369,25 +2485,14 @@ async function handleSend(event) {
       });
       queueRemoteChatSync(0, { keepBottom: true, suppressRealtimeFor: 900 });
     } else {
-      sendMessage(currentUser.id, state.currentConversationId, {
-        text,
-        replyTo: state.replyTo,
-        attachments: {
-          images: [...state.pendingImages],
-          docs: [...state.pendingDocs],
-          audio: state.pendingAudio.map((item) => {
-            const audio = normalizeAudioAttachment(item);
-            return {
-              url: audio.url,
-              mimeType: audio.mimeType,
-              duration: audio.duration,
-              waveform: audio.waveform
-            };
-          })
-        }
-      });
+      sendMessage(currentUser.id, state.currentConversationId, localPayload);
     }
   } catch (error) {
+    state.remoteSyncMutedUntil = 0;
+    if (optimisticMessage?.id) {
+      deleteMessages(currentUser.id, [optimisticMessage.id], "everyone");
+      renderAll();
+    }
     alert(error?.message || "Nao foi possivel enviar a mensagem agora.");
     return;
   }
@@ -3254,7 +3359,7 @@ function openCreateGroupModal() {
 }
 
 function openEditGroupModal(details) {
-  let pendingPhoto = details.photo || "";
+  let pendingPhoto = null;
   openFormModal({
     kicker: "Grupo",
     title: "Editar grupo",
@@ -3308,7 +3413,7 @@ function openEditGroupModal(details) {
             description: form.get("description"),
             photoUrl: pendingPhoto === "" ? "" : undefined
           };
-          if (pendingPhoto) {
+          if (typeof pendingPhoto === "string" && pendingPhoto) {
             patch.photoUrl = await resolveConversationPhotoUrl(details.threadId, pendingPhoto);
           }
           await updateGroupConversation(details.threadId, patch);
@@ -3440,11 +3545,10 @@ function wireGroupPhotoPicker(config) {
   const removeButton = config.scope.querySelector(`#${config.removeId}`);
   if (!preview || !input || !removeButton) {
     return;
-  }
-  const initialPhoto = config.initialPhoto || "";
-  paintAvatar(preview, { avatar: config.getFallback(), photo: initialPhoto }, "Grupo");
-  config.onChange(initialPhoto);
-  input.addEventListener("change", async (event) => {
+    }
+    const initialPhoto = config.initialPhoto || "";
+    paintAvatar(preview, { avatar: config.getFallback(), photo: initialPhoto }, "Grupo");
+    input.addEventListener("change", async (event) => {
     const file = event.target.files?.[0];
     if (!file) {
       return;
@@ -3512,11 +3616,33 @@ function extensionForMimeType(mimeType, fallback = "bin") {
   return fallback;
 }
 
+function isStoragePolicyError(error) {
+  const message = String(error?.message || "").toLowerCase();
+  return message.includes("row-level security")
+    || message.includes("storage")
+    || message.includes("bucket")
+    || message.includes("permission");
+}
+
 async function dataUrlToFile(source, fileName, fallbackType = "application/octet-stream") {
   const response = await fetch(source);
   const blob = await response.blob();
   const type = blob.type || fallbackType;
   return new File([blob], fileName, { type });
+}
+
+async function uploadMessageAttachmentWithFallback(conversationId, file, source) {
+  try {
+    return await uploadMessageAttachment(conversationId, file);
+  } catch (error) {
+    if (isStoragePolicyError(error) && String(source || "").startsWith("data:")) {
+      return {
+        path: `inline/${conversationId}/${Date.now()}-${file.name}`,
+        url: source
+      };
+    }
+    throw error;
+  }
 }
 
 async function uploadPendingRemoteAttachments(conversationId) {
@@ -3525,7 +3651,7 @@ async function uploadPendingRemoteAttachments(conversationId) {
 
   for (const [index, source] of state.pendingImages.entries()) {
     const file = await dataUrlToFile(source, `image-${Date.now()}-${index + 1}.jpg`, "image/jpeg");
-    const uploaded = await uploadMessageAttachment(conversationId, file);
+    const uploaded = await uploadMessageAttachmentWithFallback(conversationId, file, source);
     attachments.push({
       type: "image",
       fileName: file.name,
@@ -3537,7 +3663,7 @@ async function uploadPendingRemoteAttachments(conversationId) {
   for (const [index, doc] of state.pendingDocs.entries()) {
     const originalName = String(doc?.name || `documento-${index + 1}`);
     const file = await dataUrlToFile(doc.url, originalName);
-    const uploaded = await uploadMessageAttachment(conversationId, file);
+    const uploaded = await uploadMessageAttachmentWithFallback(conversationId, file, doc.url);
     attachments.push({
       type: "document",
       fileName: file.name,
@@ -3551,7 +3677,7 @@ async function uploadPendingRemoteAttachments(conversationId) {
     const extension = extensionForMimeType(audio.mimeType, "webm");
     const fileName = `audio-${Date.now()}-${index + 1}.${extension}`;
     const file = await dataUrlToFile(audio.url, fileName, audio.mimeType || "audio/webm");
-    const uploaded = await uploadMessageAttachment(conversationId, file);
+    const uploaded = await uploadMessageAttachmentWithFallback(conversationId, file, audio.url);
     attachments.push({
       type: "audio",
       fileName: file.name,
@@ -3575,13 +3701,15 @@ async function resolveConversationPhotoUrl(conversationId, pendingPhoto) {
   if (!pendingPhoto) {
     return "";
   }
+  if (!String(pendingPhoto).startsWith("data:")) {
+    return pendingPhoto;
+  }
   const photoFile = await dataUrlToFile(pendingPhoto, `group-photo-${Date.now()}.jpg`, "image/jpeg");
   try {
     const uploaded = await uploadConversationPhoto(conversationId, photoFile);
     return uploaded.url;
   } catch (error) {
-    const message = String(error?.message || "").toLowerCase();
-    if (message.includes("row-level security")) {
+    if (isStoragePolicyError(error)) {
       return pendingPhoto;
     }
     throw error;
@@ -3700,6 +3828,7 @@ function scrollMessagesToBottom() {
   }
   const apply = () => {
     elements.messages.scrollTop = elements.messages.scrollHeight;
+    renderScrollBottomButton();
   };
   apply();
   window.requestAnimationFrame(() => {
@@ -3768,6 +3897,7 @@ function scrollMessageIntoView(messageId, options = {}) {
     behavior: options.behavior || "smooth",
     block: options.block || "center"
   });
+  window.requestAnimationFrame(renderScrollBottomButton);
   return true;
 }
 
@@ -4082,5 +4212,7 @@ function formatConversationDayLabel(value) {
 function refreshSessionState() {
   syncUserSettings();
   renderAll();
-  queueRemoteChatSync(0);
+  if (Date.now() - state.lastRemoteSyncAt >= REMOTE_SYNC_MIN_INTERVAL) {
+    queueRemoteChatSync(0, { keepBottom: shouldStickFeedToBottom() || isFeedNearBottom() });
+  }
 }

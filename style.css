@@ -421,12 +421,17 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 }
 .chat-title { font-size: 24px; line-height: 1.05; }
 .search-panel, .reply-banner, .composer { padding: 14px; }
-.mention-jump-btn {
+.feed-fab-stack {
+  display: grid;
+  gap: 10px;
   align-self: flex-start;
+  margin: -4px 0 -4px 4px;
+}
+.mention-jump-btn {
   display: inline-flex;
   align-items: center;
   gap: 10px;
-  margin: -4px 0 -4px 4px;
+  margin: 0;
   padding: 0 14px 0 10px;
   min-height: 40px;
   border-radius: 999px;
@@ -435,6 +440,16 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
   color: var(--text);
   box-shadow: 0 10px 24px rgba(4, 12, 24, 0.12);
   backdrop-filter: blur(14px);
+}
+.scroll-bottom-btn {
+  border-color: rgba(69, 224, 177, 0.22);
+  width: 42px;
+  min-width: 42px;
+  padding: 0;
+  justify-content: center;
+}
+.scroll-bottom-btn i {
+  font-size: 15px;
 }
 .mention-jump-icon {
   width: 24px;
@@ -454,6 +469,51 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.02em;
+}
+.boot-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(5, 10, 18, 0.58);
+  backdrop-filter: blur(12px);
+}
+.boot-card {
+  width: min(420px, 100%);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 20px 22px;
+  border: 1px solid rgba(53, 194, 255, 0.14);
+  border-radius: 24px;
+  background: color-mix(in srgb, var(--panel-strong) 92%, transparent);
+  box-shadow: 0 16px 40px rgba(4, 12, 24, 0.28);
+}
+.boot-copy {
+  display: grid;
+  gap: 4px;
+}
+.boot-copy strong {
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 22px;
+}
+.boot-copy span {
+  color: var(--muted);
+  font-size: 13px;
+}
+.boot-spinner {
+  width: 42px;
+  height: 42px;
+  border-radius: 999px;
+  border: 3px solid rgba(255, 255, 255, 0.12);
+  border-top-color: var(--accent);
+  animation: boot-spin 0.9s linear infinite;
+  flex: 0 0 42px;
+}
+@keyframes boot-spin {
+  to { transform: rotate(360deg); }
 }
 .pinned-banner {
   padding: 0;
@@ -2071,8 +2131,14 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
   .drawer-head { align-items: flex-start; flex-direction: column; }
   .sidebar-top { align-items: center; flex-direction: row; }
   .reply-banner, .search-row { align-items: flex-start; flex-wrap: wrap; }
+  .feed-fab-stack {
+    width: 100%;
+    margin-left: 0;
+  }
   .mention-jump-btn {
     margin-left: 0;
+    width: fit-content;
+    max-width: 100%;
   }
   .page-chat .chat-header,
   .page-chat .details-drawer .drawer-head {
@@ -2171,5 +2237,11 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
   .camera-action-buttons .primary-btn {
     flex: 1 1 calc(50% - 6px);
     width: auto;
+  }
+  .boot-overlay {
+    padding: 16px;
+  }
+  .boot-card {
+    align-items: flex-start;
   }
 }
