@@ -261,6 +261,7 @@ const state = {
   remoteSyncQueued: false,
   remoteSyncViewportLock: null,
   stickFeedToBottomUntil: 0,
+  remoteSyncMutedUntil: 0,
   realtimeChannel: null,
   skipNextMessageClick: false,
   messageGesture: null
@@ -323,8 +324,10 @@ async function syncRemoteChatData(options = {}) {
 
   state.remoteSyncInFlight = (async () => {
   try {
-    const contacts = await listMyContacts();
-    const memberships = await listMyConversations();
+    const [contacts, memberships] = await Promise.all([
+      listMyContacts(),
+      listMyConversations()
+    ]);
     const conversationIds = memberships
       .map((entry) => entry?.conversation?.id)
       .filter(Boolean);
@@ -348,6 +351,8 @@ async function syncRemoteChatData(options = {}) {
       )
     });
     syncConversationSelection();
+    refreshCurrentConversationMarkers();
+    syncOpenConversationReadState();
     if (rerender) {
       renderAll();
       if (feedSnapshot && restoreFeedScrollState(feedSnapshot)) {
@@ -377,6 +382,9 @@ function queueRemoteChatSync(delay = 120, options = {}) {
   if (!currentUser) {
     return;
   }
+  if (Number.isFinite(options.suppressRealtimeFor) && options.suppressRealtimeFor > 0) {
+    state.remoteSyncMutedUntil = Date.now() + options.suppressRealtimeFor;
+  }
   if (options.keepBottom || shouldStickFeedToBottom()) {
     lockRemoteSyncViewport("bottom");
   } else if (options.preserveCurrentPosition) {
@@ -401,7 +409,10 @@ function setupRealtimeSync() {
         table
       },
       () => {
-        queueRemoteChatSync(90);
+        if (Date.now() < state.remoteSyncMutedUntil) {
+          return;
+        }
+        queueRemoteChatSync(90, { keepBottom: shouldStickFeedToBottom() || isFeedNearBottom() });
       }
     );
   });
@@ -483,7 +494,7 @@ function restoreFeedScrollState(snapshot) {
   return restoreFeedViewportAnchor(snapshot.anchor);
 }
 
-function requestFeedStickToBottom(duration = 1200) {
+function requestFeedStickToBottom(duration = 2600) {
   if (!state.currentConversationId) {
     return;
   }
@@ -492,6 +503,10 @@ function requestFeedStickToBottom(duration = 1200) {
 
 function shouldStickFeedToBottom() {
   return Boolean(state.currentConversationId) && Date.now() < state.stickFeedToBottomUntil;
+}
+
+function releaseFeedStickToBottom() {
+  state.stickFeedToBottomUntil = 0;
 }
 
 function lockRemoteSyncViewport(mode = "preserve") {
@@ -519,6 +534,30 @@ function syncUserSettings() {
   userSettings = getSettings(currentUser.id);
   applyTheme(userSettings);
   applyDisplayPreferences(userSettings);
+}
+
+function refreshCurrentConversationMarkers() {
+  if (!state.currentConversationId) {
+    state.unreadMarker = null;
+    state.mentionJumpMarker = null;
+    return;
+  }
+  state.unreadMarker = getUnreadMarkerForConversation(state.currentConversationId);
+  state.mentionJumpMarker = getMentionJumpMarkerForConversation(state.currentConversationId);
+}
+
+function syncOpenConversationReadState() {
+  if (!state.currentConversationId || document.visibilityState !== "visible") {
+    return;
+  }
+  const unreadMarker = getUnreadMarkerForConversation(state.currentConversationId);
+  if (!unreadMarker?.messageId) {
+    refreshCurrentConversationMarkers();
+    return;
+  }
+  markConversationRead(currentUser.id, state.currentConversationId);
+  refreshCurrentConversationMarkers();
+  syncRemoteReadState(state.currentConversationId);
 }
 
 async function syncRemoteReadState(conversationId) {
@@ -611,13 +650,14 @@ function bindEvents() {
     document.addEventListener("click", handleOuterClick);
     document.getElementById("lightbox-close").addEventListener("click", closeLightbox);
     elements.lightbox.addEventListener("click", (event) => { if (event.target === elements.lightbox) closeLightbox(); });
-    document.getElementById("camera-close").addEventListener("click", closeCameraPreview);
-    elements.cameraLayer.addEventListener("click", (event) => { if (event.target === elements.cameraLayer) closeCameraPreview(); });
-    elements.cameraCaptureBtn.addEventListener("click", captureCameraFrame);
-    elements.cameraFlipBtn.addEventListener("click", rotateCameraPreview);
-    elements.cameraFallbackBtn.addEventListener("click", useCameraFileFallback);
-    elements.messages.addEventListener("pointerdown", handleMessageGestureStart, { passive: true });
-    elements.messages.addEventListener("pointermove", handleMessageGestureMove, { passive: true });
+  document.getElementById("camera-close").addEventListener("click", closeCameraPreview);
+  elements.cameraLayer.addEventListener("click", (event) => { if (event.target === elements.cameraLayer) closeCameraPreview(); });
+  elements.cameraCaptureBtn.addEventListener("click", captureCameraFrame);
+  elements.cameraFlipBtn.addEventListener("click", rotateCameraPreview);
+  elements.cameraFallbackBtn.addEventListener("click", useCameraFileFallback);
+  elements.messages.addEventListener("scroll", handleMessageFeedScroll, { passive: true });
+  elements.messages.addEventListener("pointerdown", handleMessageGestureStart, { passive: true });
+  elements.messages.addEventListener("pointermove", handleMessageGestureMove, { passive: true });
     elements.messages.addEventListener("pointerup", handleMessageGestureEnd, { passive: true });
     elements.messages.addEventListener("pointercancel", handleMessageGestureEnd, { passive: true });
     elements.messages.addEventListener("pointerleave", handleMessageGestureEnd, { passive: true });
@@ -750,6 +790,17 @@ function handleViewportChange() {
     state.mobilePanel = "chat";
   }
   syncResponsiveLayout();
+}
+
+function handleMessageFeedScroll() {
+  if (!state.currentConversationId) {
+    return;
+  }
+  if (isFeedNearBottom(36)) {
+    requestFeedStickToBottom(2200);
+    return;
+  }
+  releaseFeedStickToBottom();
 }
 
 function toggleDetailsDrawer() {
@@ -2316,7 +2367,7 @@ async function handleSend(event) {
         attachments: uploaded.attachments,
         metadata: uploaded.metadata
       });
-      queueRemoteChatSync(0, { keepBottom: true });
+      queueRemoteChatSync(0, { keepBottom: true, suppressRealtimeFor: 900 });
     } else {
       sendMessage(currentUser.id, state.currentConversationId, {
         text,
@@ -2771,8 +2822,7 @@ function handleMessageClick(event) {
     state.openReactionPickerId = null;
     if (message?.isRemote) {
       setPinnedMessage({ conversationId: message.threadId, messageId })
-        .then(() => queueRemoteChatSync(0, { keepBottom: true }))
-        .then(() => renderConversationPreserveViewport({ messageId, forceBottom: true }))
+        .then(() => queueRemoteChatSync(0, { keepBottom: true, suppressRealtimeFor: 700 }))
         .catch((error) => alert(error?.message || "Nao foi possivel fixar a mensagem."));
     } else {
       togglePinned(currentUser.id, messageId);
@@ -2786,8 +2836,7 @@ function handleMessageClick(event) {
     state.openReactionPickerId = null;
     if (message?.isRemote) {
       toggleMessageFavorite(messageId)
-        .then(() => queueRemoteChatSync(0, { keepBottom: true }))
-        .then(() => renderConversationPreserveViewport({ messageId, forceBottom: true }))
+        .then(() => queueRemoteChatSync(0, { keepBottom: true, suppressRealtimeFor: 700 }))
         .catch((error) => alert(error?.message || "Nao foi possivel favoritar a mensagem."));
     } else {
       toggleFavorite(currentUser.id, messageId);
@@ -2801,8 +2850,7 @@ function handleMessageClick(event) {
     state.openReactionPickerId = null;
     if (message?.isRemote) {
       setMessageReaction(messageId, target.dataset.reaction)
-        .then(() => queueRemoteChatSync(0, { keepBottom: true }))
-        .then(() => renderConversationPreserveViewport({ messageId, forceBottom: true }))
+        .then(() => queueRemoteChatSync(0, { keepBottom: true, suppressRealtimeFor: 700 }))
         .catch((error) => alert(error?.message || "Nao foi possivel reagir a essa mensagem."));
     } else {
       toggleReaction(currentUser.id, messageId, target.dataset.reaction);
@@ -3187,9 +3235,8 @@ function openCreateGroupModal() {
           memberIds: form.getAll("member")
         });
         if (pendingPhoto) {
-          const photoFile = await dataUrlToFile(pendingPhoto, `group-photo-${Date.now()}.jpg`, "image/jpeg");
-          const uploaded = await uploadConversationPhoto(conversation.id, photoFile);
-          await updateGroupConversation(conversation.id, { photoUrl: uploaded.url });
+          const photoUrl = await resolveConversationPhotoUrl(conversation.id, pendingPhoto);
+          await updateGroupConversation(conversation.id, { photoUrl });
         }
         await sendRemoteMessage({
           conversationId: conversation.id,
@@ -3258,12 +3305,11 @@ function openEditGroupModal(details) {
         if (details.isRemote) {
           const patch = {
             title: form.get("title"),
-            description: form.get("description")
+            description: form.get("description"),
+            photoUrl: pendingPhoto === "" ? "" : undefined
           };
           if (pendingPhoto) {
-            const photoFile = await dataUrlToFile(pendingPhoto, `group-photo-${Date.now()}.jpg`, "image/jpeg");
-            const uploaded = await uploadConversationPhoto(details.threadId, photoFile);
-            patch.photoUrl = uploaded.url;
+            patch.photoUrl = await resolveConversationPhotoUrl(details.threadId, pendingPhoto);
           }
           await updateGroupConversation(details.threadId, patch);
           await sendRemoteMessage({
@@ -3523,6 +3569,23 @@ async function uploadPendingRemoteAttachments(conversationId) {
   }
 
   return { attachments, metadata };
+}
+
+async function resolveConversationPhotoUrl(conversationId, pendingPhoto) {
+  if (!pendingPhoto) {
+    return "";
+  }
+  const photoFile = await dataUrlToFile(pendingPhoto, `group-photo-${Date.now()}.jpg`, "image/jpeg");
+  try {
+    const uploaded = await uploadConversationPhoto(conversationId, photoFile);
+    return uploaded.url;
+  } catch (error) {
+    const message = String(error?.message || "").toLowerCase();
+    if (message.includes("row-level security")) {
+      return pendingPhoto;
+    }
+    throw error;
+  }
 }
 
 function setComposerEnabled(enabled) {

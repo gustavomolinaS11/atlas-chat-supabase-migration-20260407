@@ -169,7 +169,7 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
   border-radius: var(--radius-xl);
   background: var(--panel);
   box-shadow: var(--shadow);
-  backdrop-filter: blur(18px);
+  backdrop-filter: blur(10px);
   animation: shell-enter 0.24s ease both;
 }
 .auth-hero, .auth-panel, .sidebar, .chat-shell, .details-drawer, .settings-sidebar, .settings-main { padding: 24px; }
@@ -687,6 +687,7 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
   min-height: 0;
   overflow: auto;
   overflow-anchor: none;
+  contain: layout paint;
   display: grid;
   gap: 10px;
   align-content: start;
@@ -749,10 +750,10 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
   min-width: 0;
   display: grid;
   gap: 4px;
-  transition: transform 120ms ease;
-  will-change: transform;
+  transition: transform 90ms ease;
 }
 .message-row.gesture-active .message-stack {
+  will-change: transform;
   transform: translateX(var(--swipe-offset, 0px));
 }
 .message-row.mine .message-stack {
@@ -1122,7 +1123,7 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
   border-radius: 16px;
   background: var(--panel-strong);
   box-shadow: 0 14px 28px rgba(4, 12, 24, 0.18);
-  backdrop-filter: blur(16px);
+  backdrop-filter: blur(10px);
 }
 .message.mine .message-menu {
   right: 10px;
@@ -1720,6 +1721,10 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
   display: grid;
   gap: 2px;
   min-width: 0;
+}
+.settings-mobile-reset {
+  margin-left: auto;
+  white-space: nowrap;
 }
 .settings-mobile-copy strong {
   font-family: "Space Grotesk", sans-serif;

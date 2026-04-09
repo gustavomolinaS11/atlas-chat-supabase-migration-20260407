@@ -41,6 +41,7 @@ const ICONS = {
 const elements = {
   avatar: document.getElementById("settings-avatar"),
   mobileBackLink: document.querySelector(".settings-mobile-back"),
+  mobileResetBtn: document.getElementById("settings-mobile-reset"),
   name: document.getElementById("settings-name"),
   handle: document.getElementById("settings-handle"),
   profilePreview: document.getElementById("profile-photo-preview"),
@@ -160,6 +161,7 @@ function bindEvents() {
   elements.exportBtn.addEventListener("click", handleExport);
   elements.importInput.addEventListener("change", handleImport);
   elements.resetSettingsBtn.addEventListener("click", handleResetSettings);
+  elements.mobileResetBtn?.addEventListener("click", handleResetSettings);
   elements.resetBtn.addEventListener("click", handleReset);
   elements.globalSearch.addEventListener("input", renderSearchResults);
   activateNav(window.location.hash || "#section-profile");
