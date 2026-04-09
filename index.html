@@ -22,14 +22,14 @@
 
       <div class="auth-copy">
         <h1>Chat com login, contatos editaveis e grupos com admin.</h1>
-        <p>Cadastro e login agora usam Supabase. Novas contas comecam limpas e recebem apenas o contato IA como guia inicial.</p>
+        <p>Novas contas comecam limpas e recebem apenas o contato IA como guia inicial.</p>
       </div>
 
       <div class="auth-demo">
-        <div class="card-kicker">Auth Supabase</div>
+        <div class="card-kicker">Atlas</div>
         <div class="demo-item"><strong>Login</strong><span>Use email + senha</span></div>
-        <div class="demo-item"><strong>Cadastro</strong><span>Cria perfil no banco</span></div>
-        <div class="demo-item"><strong>Sessao</strong><span>Persistida no navegador</span></div>
+        <div class="demo-item"><strong>Cadastro</strong><span>Crie seu perfil</span></div>
+        <div class="demo-item"><strong>Sessao</strong><span>Acesse de onde parou</span></div>
       </div>
     </section>
 
@@ -47,6 +47,13 @@
         <label class="field">
           <span>Senha</span>
           <input id="login-password" type="password" placeholder="demo123" required>
+        </label>
+        <label class="toggle-row auth-remember-row">
+          <div>
+            <strong>Lembrar de mim</strong>
+            <span class="muted-line">Mantem a sessao salva neste dispositivo.</span>
+          </div>
+          <input id="remember-me" type="checkbox" checked>
         </label>
         <button class="primary-btn wide" type="submit">Entrar</button>
       </form>

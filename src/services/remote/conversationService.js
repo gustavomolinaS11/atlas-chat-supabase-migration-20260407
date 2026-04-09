@@ -1,5 +1,5 @@
 import { supabase } from '../../lib/supabaseClient.js';
-import { mapConversation } from '../../lib/dbMappers.js';
+import { mapConversation, mapConversationMember, mapProfile } from '../../lib/dbMappers.js';
 
 export async function listMyConversations() {
   const { data: auth } = await supabase.auth.getUser();
@@ -12,10 +12,13 @@ export async function listMyConversations() {
       role,
       joined_at,
       last_read_at,
+      archived_at,
+      cleared_at,
       conversations (
         id,
         type,
         title,
+        description,
         photo_url,
         created_by,
         created_at,
@@ -30,11 +33,13 @@ export async function listMyConversations() {
     role: row.role,
     joinedAt: row.joined_at,
     lastReadAt: row.last_read_at,
+    archivedAt: row.archived_at,
+    clearedAt: row.cleared_at,
     conversation: mapConversation(row.conversations)
   }));
 }
 
-export async function createGroupConversation({ title, memberIds = [], photoUrl = '' }) {
+export async function createGroupConversation({ title, description = '', memberIds = [], photoUrl = '' }) {
   const { data: auth } = await supabase.auth.getUser();
   const userId = auth.user?.id;
   if (!userId) throw new Error('Sessao ausente');
@@ -44,6 +49,7 @@ export async function createGroupConversation({ title, memberIds = [], photoUrl 
     .insert({
       type: 'group',
       title,
+      description,
       photo_url: photoUrl,
       created_by: userId
     })
@@ -83,9 +89,17 @@ export async function createOrGetDirectConversation(peerUserId) {
 
   const directConversationId = [...counts.entries()].find(([, count]) => count === 2)?.[0];
   if (directConversationId) {
-    const { data, error } = await supabase.from('conversations').select('*').eq('id', directConversationId).single();
+    const { data, error } = await supabase
+      .from('conversations')
+      .select('*')
+      .eq('id', directConversationId)
+      .eq('type', 'direct')
+      .maybeSingle();
+
     if (error) throw error;
-    return mapConversation(data);
+    if (data) {
+      return mapConversation(data);
+    }
   }
 
   const { data: conversation, error: conversationError } = await supabase
@@ -108,6 +122,7 @@ export async function createOrGetDirectConversation(peerUserId) {
 export async function updateGroupConversation(conversationId, patch) {
   const payload = {};
   if (typeof patch.title === 'string') payload.title = patch.title;
+  if (typeof patch.description === 'string') payload.description = patch.description;
   if (typeof patch.photoUrl === 'string') payload.photo_url = patch.photoUrl;
 
   const { data, error } = await supabase
@@ -147,5 +162,77 @@ export async function removeGroupMember(conversationId, userId) {
     .delete()
     .eq('conversation_id', conversationId)
     .eq('user_id', userId);
+  if (error) throw error;
+}
+
+export async function listConversationMembers(conversationId) {
+  const { data, error } = await supabase
+    .from('conversation_members')
+    .select(`
+      conversation_id,
+      user_id,
+      role,
+      joined_at,
+      last_read_at,
+      archived_at,
+      cleared_at,
+      profile:profiles (
+        id,
+        username,
+        name,
+        bio,
+        avatar_url,
+        last_seen_at
+      )
+    `)
+    .eq('conversation_id', conversationId)
+    .order('joined_at', { ascending: true });
+
+  if (error) throw error;
+  return (data || []).map((row) => ({
+    ...mapConversationMember(row),
+    profile: row.profile ? mapProfile(row.profile) : null
+  }));
+}
+
+export async function markConversationRead(conversationId) {
+  const { data: auth } = await supabase.auth.getUser();
+  const userId = auth.user?.id;
+  if (!userId) throw new Error('Sessao ausente');
+
+  const { error } = await supabase
+    .from('conversation_members')
+    .update({ last_read_at: new Date().toISOString() })
+    .eq('conversation_id', conversationId)
+    .eq('user_id', userId);
+
+  if (error) throw error;
+}
+
+export async function setConversationArchived(conversationId, archived) {
+  const { data: auth } = await supabase.auth.getUser();
+  const userId = auth.user?.id;
+  if (!userId) throw new Error('Sessao ausente');
+
+  const { error } = await supabase
+    .from('conversation_members')
+    .update({ archived_at: archived ? new Date().toISOString() : null })
+    .eq('conversation_id', conversationId)
+    .eq('user_id', userId);
+
+  if (error) throw error;
+}
+
+export async function clearConversationForMe(conversationId) {
+  const { data: auth } = await supabase.auth.getUser();
+  const userId = auth.user?.id;
+  if (!userId) throw new Error('Sessao ausente');
+
+  const { error } = await supabase
+    .from('conversation_members')
+    .update({ cleared_at: new Date().toISOString() })
+    .eq('conversation_id', conversationId)
+    .eq('user_id', userId);
+
   if (error) throw error;
 }

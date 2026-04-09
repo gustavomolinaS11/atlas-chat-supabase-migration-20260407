@@ -1,4 +1,10 @@
-﻿const STATE_KEY = "atlas.state.v6";
+import {
+  readPersistedValue,
+  removePersistedValue,
+  writePersistedValue
+} from "./src/lib/sessionPersistence.js";
+
+const STATE_KEY = "atlas.state.v6";
 const SESSION_KEY = "atlas.session.v4";
 const USERS_URL = "data/users.json";
 const THREADS_URL = "data/threads.json";
@@ -201,6 +207,7 @@ function normalizeThread(thread, index) {
   return {
     id: String(thread.id || `t-${index + 1}`),
     type,
+    remote: Boolean(thread.remote),
     title: String(thread.title || ""),
     avatar: String(thread.avatar || ""),
     photo: typeof thread.photo === "string" ? thread.photo : "",
@@ -587,7 +594,9 @@ function canViewerSeePrivacy(state, viewerId, targetUserId, key) {
   if (!viewerId || viewerId === targetUserId) {
     return true;
   }
-  return ensureSettingsRecord(state, targetUserId).privacy[key] !== "nobody";
+  const viewerPrivacy = ensureSettingsRecord(state, viewerId).privacy[key];
+  const targetPrivacy = ensureSettingsRecord(state, targetUserId).privacy[key];
+  return viewerPrivacy !== "nobody" && targetPrivacy !== "nobody";
 }
 
 function getUserPresence(state, userId) {
@@ -671,6 +680,7 @@ function buildDirectEntry(state, userId, otherUser) {
     unreadCount: thread ? getUnreadCountForThread(state, userId, thread.id) : 0,
     mentionCount: unreadMentionCount,
     hasUnreadMention: unreadMentionCount > 0,
+    isRemote: Boolean(thread?.remote),
     timestamp: lastMessage?.createdAt || thread?.createdAt || 0,
     isArchived: Boolean(thread?.archivedBy.includes(userId)),
     isPinnedConversation: Boolean(owner?.pinnedConversationIds.includes(conversationId))
@@ -699,6 +709,7 @@ function buildGroupEntry(state, userId, thread) {
     unreadCount: getUnreadCountForThread(state, userId, thread.id),
     mentionCount: unreadMentionCount,
     hasUnreadMention: unreadMentionCount > 0,
+    isRemote: Boolean(thread.remote),
     timestamp: lastMessage?.createdAt || thread.createdAt,
     isArchived: thread.archivedBy.includes(userId),
     isPinnedConversation: Boolean(owner?.pinnedConversationIds.includes(conversationId))
@@ -724,6 +735,79 @@ function ensureDraftRecord(state, userId) {
 function normalizeAttachments(attachments) {
   const value = attachments || {};
   return { images: Array.isArray(value.images) ? value.images : [], docs: Array.isArray(value.docs) ? value.docs : [], audio: Array.isArray(value.audio) ? value.audio : [] };
+}
+
+function toTimestamp(value, fallback = 0) {
+  if (Number.isFinite(Number(value))) {
+    return Number(value);
+  }
+  const parsed = Date.parse(String(value || ""));
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function buildRemoteUserRecord(existingUser, profile) {
+  const name = String(profile?.name || existingUser?.name || "Conta");
+  const username = sanitizeUsername(String(profile?.username || existingUser?.username || "user"));
+  return normalizeUser({
+    id: String(profile?.id || existingUser?.id || uid("u")),
+    name,
+    username,
+    email: String(existingUser?.email || `${username || "user"}@atlas.local`).toLowerCase(),
+    password: String(existingUser?.password || "__supabase__"),
+    avatar: buildInitials(name),
+    photo: typeof profile?.avatarUrl === "string" ? profile.avatarUrl : (existingUser?.photo || ""),
+    bio: String(profile?.bio || existingUser?.bio || "Member"),
+    kind: "user",
+    lastSeenAt: toTimestamp(profile?.lastSeenAt, existingUser?.lastSeenAt || Date.now()),
+    contactIds: existingUser?.contactIds || [],
+    pinnedConversationIds: existingUser?.pinnedConversationIds || [],
+    contactEdits: existingUser?.contactEdits || {}
+  }, 0);
+}
+
+function mapRemoteAttachmentsToLocal(message) {
+  const attachments = { images: [], docs: [], audio: [] };
+  const audioMeta = message?.metadata?.audio && typeof message.metadata.audio === "object" ? message.metadata.audio : {};
+  (Array.isArray(message?.attachments) ? message.attachments : []).forEach((attachment) => {
+    if (attachment.type === "image") {
+      attachments.images.push(attachment.public_url);
+      return;
+    }
+    if (attachment.type === "document") {
+      attachments.docs.push({
+        name: attachment.file_name || "Documento",
+        url: attachment.public_url
+      });
+      return;
+    }
+    if (attachment.type === "audio") {
+      const meta = audioMeta[attachment.file_name] && typeof audioMeta[attachment.file_name] === "object"
+        ? audioMeta[attachment.file_name]
+        : (audioMeta.default && typeof audioMeta.default === "object" ? audioMeta.default : {});
+      attachments.audio.push({
+        url: attachment.public_url,
+        previewUrl: attachment.public_url,
+        mimeType: meta.mimeType || "",
+        duration: Number.isFinite(Number(meta.duration)) ? Number(meta.duration) : 0,
+        waveform: Array.isArray(meta.waveform) ? meta.waveform : []
+      });
+    }
+  });
+  return attachments;
+}
+
+function mapRemoteReactionsToLocal(message) {
+  return (Array.isArray(message?.reactions) ? message.reactions : []).reduce((result, reaction) => {
+    const token = String(reaction.emoji || "").trim();
+    if (!token) {
+      return result;
+    }
+    if (!result[token]) {
+      result[token] = [];
+    }
+    result[token].push(reaction.user_id);
+    return result;
+  }, {});
 }
 
 function getSenderStatus(state, message, thread, userId) {
@@ -765,7 +849,7 @@ export async function ensureStore() {
 }
 
 export function getSessionUserId() {
-  return localStorage.getItem(SESSION_KEY);
+  return readPersistedValue(SESSION_KEY);
 }
 
 export function getCurrentUser() {
@@ -823,11 +907,171 @@ export function upsertRemoteSessionUser(profile, authUser = null) {
     } else {
       state.users.push(normalizeUser(nextPayload, state.users.length));
     }
-    ensureSettingsRecord(state, profile.id);
+    const currentSettings = ensureSettingsRecord(state, profile.id);
+    state.settings[profile.id] = normalizeSettingsRecord({
+      ...currentSettings,
+      ...(profile.settings && typeof profile.settings === "object" ? profile.settings : {}),
+      privacy: {
+        ...currentSettings.privacy,
+        ...(profile.privacy && typeof profile.privacy === "object" ? profile.privacy : {})
+      }
+    });
     ensureDraftRecord(state, profile.id);
     seedAssistantConversation(state, profile.id);
-    localStorage.setItem(SESSION_KEY, profile.id);
+    writePersistedValue(SESSION_KEY, profile.id);
     return { ok: true, user: findUser(state, profile.id) };
+  });
+}
+
+export function applyRemoteChatSnapshot(userId, snapshot) {
+  return withState((state) => {
+    const currentUser = findUser(state, userId);
+    if (!currentUser) {
+      return { ok: false, error: "Sessao local ausente" };
+    }
+
+    const contactRows = Array.isArray(snapshot?.contacts) ? snapshot.contacts : [];
+    const conversationRows = Array.isArray(snapshot?.conversations) ? snapshot.conversations : [];
+    const membersByConversation = snapshot?.membersByConversation && typeof snapshot.membersByConversation === "object"
+      ? snapshot.membersByConversation
+      : {};
+    const messagesByConversation = snapshot?.messagesByConversation && typeof snapshot.messagesByConversation === "object"
+      ? snapshot.messagesByConversation
+      : {};
+    const favoriteMessageIds = new Set(Array.isArray(snapshot?.favoriteMessageIds) ? snapshot.favoriteMessageIds : []);
+    const hiddenMessageIds = new Set(Array.isArray(snapshot?.hiddenMessageIds) ? snapshot.hiddenMessageIds : []);
+    const pinnedMessageIdsByConversation = snapshot?.pinnedMessageIdsByConversation && typeof snapshot.pinnedMessageIdsByConversation === "object"
+      ? snapshot.pinnedMessageIdsByConversation
+      : {};
+
+    const preservedAssistantUsers = state.users.filter((user) => isAssistantUser(user));
+    const preservedAssistantThreads = state.threads.filter((thread) => thread.memberIds.includes(userId) && thread.memberIds.includes(ASSISTANT_USER_ID));
+    const preservedAssistantThreadIds = new Set(preservedAssistantThreads.map((thread) => thread.id));
+    const preservedAssistantMessages = state.messages.filter((message) => preservedAssistantThreadIds.has(message.threadId));
+
+    const remoteUsers = new Map();
+    const ensureRemoteUser = (profile) => {
+      if (!profile?.id) {
+        return null;
+      }
+      const existing = remoteUsers.get(profile.id) || state.users.find((user) => user.id === profile.id) || null;
+      const nextUser = buildRemoteUserRecord(existing, profile);
+      remoteUsers.set(nextUser.id, nextUser);
+      return nextUser;
+    };
+
+    ensureRemoteUser({
+      id: currentUser.id,
+      name: currentUser.name,
+      username: currentUser.username,
+      bio: currentUser.bio,
+      avatarUrl: currentUser.photo,
+      lastSeenAt: currentUser.lastSeenAt
+    });
+
+    contactRows.forEach((contact) => {
+      if (contact?.profile) {
+        ensureRemoteUser(contact.profile);
+      }
+    });
+    Object.values(membersByConversation).forEach((members) => {
+      (Array.isArray(members) ? members : []).forEach((member) => {
+        if (member?.profile) {
+          ensureRemoteUser(member.profile);
+        }
+      });
+    });
+
+    const nextCurrentUser = remoteUsers.get(userId) || buildRemoteUserRecord(currentUser, currentUser);
+    nextCurrentUser.contactIds = uniqueStrings([
+      ASSISTANT_USER_ID,
+      ...contactRows.map((contact) => contact.contactUserId)
+    ]);
+    nextCurrentUser.contactEdits = Object.fromEntries(
+      contactRows
+        .filter((contact) => contact.contactUserId)
+        .map((contact) => [
+          contact.contactUserId,
+          {
+            nickname: String(contact.nickname || ""),
+            label: String(contact.label || "")
+          }
+        ])
+    );
+    remoteUsers.set(userId, nextCurrentUser);
+
+    const remoteThreads = conversationRows
+      .map((membership, index) => {
+        const conversation = membership?.conversation;
+        if (!conversation?.id) {
+          return null;
+        }
+        const members = Array.isArray(membersByConversation[conversation.id]) ? membersByConversation[conversation.id] : [];
+        return normalizeThread({
+          id: conversation.id,
+          type: conversation.type,
+          remote: true,
+          title: conversation.title || "",
+          avatar: conversation.type === "group" ? buildInitials(conversation.title || "Grupo") : "",
+          photo: conversation.photoUrl || "",
+          description: conversation.description || "",
+          memberIds: members.map((member) => member.userId),
+          admins: members.filter((member) => member.role === "admin").map((member) => member.userId),
+          createdBy: conversation.createdBy || members.find((member) => member.role === "admin")?.userId || userId,
+          createdAt: toTimestamp(conversation.createdAt, Date.now()),
+          archivedBy: membership.archivedAt ? [userId] : [],
+          clearedAtBy: membership.clearedAt ? { [userId]: toTimestamp(membership.clearedAt, 0) } : {}
+        }, index);
+      })
+      .filter(Boolean);
+
+    const remoteMessages = [];
+    remoteThreads.forEach((thread) => {
+      const members = Array.isArray(membersByConversation[thread.id]) ? membersByConversation[thread.id] : [];
+      const lastReadByUser = Object.fromEntries(members.map((member) => [member.userId, toTimestamp(member.lastReadAt, 0)]));
+      const pinnedMessageId = pinnedMessageIdsByConversation[thread.id] || "";
+      const remoteConversationMessages = Array.isArray(messagesByConversation[thread.id]) ? messagesByConversation[thread.id] : [];
+      remoteConversationMessages.forEach((message, index) => {
+        const createdAt = toTimestamp(message.createdAt, Date.now());
+        const receipts = Object.fromEntries(thread.memberIds.map((memberId) => {
+          if (memberId === message.senderId) {
+            return [memberId, "read"];
+          }
+          return [memberId, lastReadByUser[memberId] && createdAt <= lastReadByUser[memberId] ? "read" : "sent"];
+        }));
+        remoteMessages.push(normalizeMessage({
+          id: message.id,
+          threadId: thread.id,
+          senderId: message.senderId,
+          kind: message.kind || "message",
+          text: message.text || "",
+          createdAt,
+          editedAt: message.editedAt ? toTimestamp(message.editedAt, 0) : null,
+          replyTo: message.replyTo || null,
+          attachments: mapRemoteAttachmentsToLocal(message),
+          pinnedBy: pinnedMessageId === message.id ? [userId] : [],
+          favoriteBy: favoriteMessageIds.has(message.id) ? [userId] : [],
+          hiddenFor: hiddenMessageIds.has(message.id) ? [userId] : [],
+          mentions: (Array.isArray(message.mentions) ? message.mentions : []).map((mention) => mention.user_id).filter(Boolean),
+          reactions: mapRemoteReactionsToLocal(message),
+          receipts
+        }, index, new Map([[thread.id, thread]])));
+      });
+    });
+
+    state.users = [...preservedAssistantUsers, ...remoteUsers.values()]
+      .filter((user, index, list) => list.findIndex((item) => item.id === user.id) === index);
+    state.threads = [...remoteThreads, ...preservedAssistantThreads];
+    state.messages = [...remoteMessages, ...preservedAssistantMessages].sort((left, right) => left.createdAt - right.createdAt);
+    ensureSettingsRecord(state, userId);
+    ensureDraftRecord(state, userId);
+    seedAssistantConversation(state, userId);
+    return {
+      ok: true,
+      users: state.users.length,
+      threads: state.threads.length,
+      messages: state.messages.length
+    };
   });
 }
 
@@ -841,7 +1085,7 @@ export function loginUser(identifier, password) {
   if (!user || user.password !== password) {
     return { ok: false, error: "Credenciais invalidas" };
   }
-  localStorage.setItem(SESSION_KEY, user.id);
+  writePersistedValue(SESSION_KEY, user.id);
   markAllDeliveredForUser(user.id);
   return { ok: true, user };
 }
@@ -883,7 +1127,7 @@ export function registerUser(payload) {
     seedAssistantConversation(state, user.id);
     ensureSettingsRecord(state, user.id);
     ensureDraftRecord(state, user.id);
-    localStorage.setItem(SESSION_KEY, user.id);
+    writePersistedValue(SESSION_KEY, user.id);
     return { ok: true, user };
   });
 }
@@ -900,7 +1144,7 @@ export function logoutUser() {
     }
     return null;
   });
-  localStorage.removeItem(SESSION_KEY);
+  removePersistedValue(SESSION_KEY);
 }
 export function getSettings(userId) {
   const state = readState();
@@ -1151,6 +1395,7 @@ export function getConversationDetails(userId, conversationId) {
       canSeeLastSeen,
       canSeeProfilePhoto,
       presence,
+      isRemote: Boolean(thread?.remote),
       isArchived: Boolean(thread?.archivedBy.includes(userId)),
       isPinnedConversation: Boolean(owner?.pinnedConversationIds.includes(conversationId))
     };
@@ -1176,6 +1421,7 @@ export function getConversationDetails(userId, conversationId) {
     canSeeLastSeen: false,
     canSeeProfilePhoto: false,
     presence: "group",
+    isRemote: Boolean(thread.remote),
     isArchived: thread.archivedBy.includes(userId),
     isPinnedConversation: Boolean(owner?.pinnedConversationIds.includes(conversationId))
   };
@@ -1196,6 +1442,7 @@ export function getMessagesForConversation(userId, conversationId) {
       ...message,
       sender: findUser(state, message.senderId),
       thread,
+      isRemote: Boolean(thread.remote),
       isPinned: message.pinnedBy.includes(userId),
       isFavorite: message.favoriteBy.includes(userId),
       mentionsCurrentUser: Array.isArray(message.mentions) && message.mentions.includes(userId),
@@ -1835,7 +2082,7 @@ export function importState(payload) {
 
 export function clearAllData() {
   localStorage.removeItem(STATE_KEY);
-  localStorage.removeItem(SESSION_KEY);
+  removePersistedValue(SESSION_KEY);
 }
 
 export function formatClock(value) {

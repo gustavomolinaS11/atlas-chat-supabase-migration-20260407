@@ -1,11 +1,10 @@
 ﻿import {
-  addContact,
   addGroupMembers,
   applyDisplayPreferences,
+  applyRemoteChatSnapshot,
   applyTheme,
   clearConversationHistory,
   clipText,
-  createGroup,
   deleteMessages,
   ensureStore,
   exportState,
@@ -27,7 +26,6 @@
   markConversationRead,
   removeGroupMember,
   requireSession,
-  searchUsersByUsername,
   saveDraft,
   sendMessage,
   setFavoriteMessages,
@@ -37,6 +35,7 @@
   toggleGroupAdmin,
   togglePinned,
   toggleReaction,
+  upsertRemoteSessionUser,
   updateGroup,
   updateMessage
 } from "./store.js";
@@ -44,6 +43,42 @@ import {
   getCurrentSession as getRemoteSession,
   signOutUser as signOutRemoteUser
 } from "./src/services/remote/authService.js";
+import { getMyProfile } from "./src/services/remote/profileService.js";
+import {
+  listMyContacts,
+  searchProfiles,
+  upsertMyContact
+} from "./src/services/remote/contactService.js";
+import {
+  addGroupMembers as addRemoteGroupMembers,
+  clearConversationForMe as clearRemoteConversationForMe,
+  createGroupConversation,
+  createOrGetDirectConversation,
+  listConversationMembers,
+  listMyConversations,
+  markConversationRead as markRemoteConversationRead,
+  removeGroupMember as removeRemoteGroupMember,
+  setConversationArchived,
+  setMemberRole,
+  updateGroupConversation
+} from "./src/services/remote/conversationService.js";
+import {
+  deleteOwnMessage,
+  editOwnMessage,
+  hideMessageForMe,
+  listMessages,
+  listMyFavoriteMessageIds,
+  listMyHiddenMessageIds,
+  listMyPinnedMessages,
+  sendMessage as sendRemoteMessage,
+  setMessageReaction,
+  setPinnedMessage,
+  toggleMessageFavorite
+} from "./src/services/remote/messageService.js";
+import {
+  uploadConversationPhoto,
+  uploadMessageAttachment
+} from "./src/services/remote/storageService.js";
 
 const currentUser = requireSession("index.html");
 let userSettings = currentUser ? getSettings(currentUser.id) : null;
@@ -219,6 +254,8 @@ async function init() {
     return;
   }
   await ensureStore();
+  await syncRemoteProfile(remoteSession.user);
+  await syncRemoteChatData();
   syncUserSettings();
   markAllDeliveredForUser(currentUser.id);
   decorateStaticIcons();
@@ -231,10 +268,65 @@ async function init() {
   state.pendingOpenMessageId = "";
 }
 
+async function syncRemoteProfile(authUser) {
+  try {
+    const profile = await getMyProfile();
+    if (profile) {
+      upsertRemoteSessionUser(profile, authUser);
+    }
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+async function syncRemoteChatData() {
+  try {
+    const contacts = await listMyContacts();
+    const memberships = await listMyConversations();
+    const conversationIds = memberships
+      .map((entry) => entry?.conversation?.id)
+      .filter(Boolean);
+    const uniqueConversationIds = [...new Set(conversationIds)];
+    const [memberRows, messageRows, favoriteMessageIds, hiddenMessageIds, pinnedMessages] = await Promise.all([
+      Promise.all(uniqueConversationIds.map(async (conversationId) => [conversationId, await listConversationMembers(conversationId)])),
+      Promise.all(uniqueConversationIds.map(async (conversationId) => [conversationId, await listMessages(conversationId)])),
+      listMyFavoriteMessageIds(),
+      listMyHiddenMessageIds(),
+      listMyPinnedMessages()
+    ]);
+    applyRemoteChatSnapshot(currentUser.id, {
+      contacts,
+      conversations: memberships,
+      membersByConversation: Object.fromEntries(memberRows),
+      messagesByConversation: Object.fromEntries(messageRows),
+      favoriteMessageIds,
+      hiddenMessageIds,
+      pinnedMessageIdsByConversation: Object.fromEntries(
+        (pinnedMessages || []).map((row) => [row.conversation_id, row.message_id])
+      )
+    });
+    syncConversationSelection();
+  } catch (error) {
+    console.error(error);
+  }
+}
+
 function syncUserSettings() {
   userSettings = getSettings(currentUser.id);
   applyTheme(userSettings);
   applyDisplayPreferences(userSettings);
+}
+
+async function syncRemoteReadState(conversationId) {
+  const details = conversationId ? getConversationDetails(currentUser.id, conversationId) : null;
+  if (!details?.isRemote || !details.threadId) {
+    return;
+  }
+  try {
+    await markRemoteConversationRead(details.threadId);
+  } catch (error) {
+    console.error(error);
+  }
 }
 
 function decorateStaticIcons() {
@@ -369,6 +461,7 @@ function selectInitialConversation() {
     state.mentionJumpMarker = getMentionJumpMarkerForConversation(state.currentConversationId);
     state.pendingOpenMessageId = state.unreadMarker?.messageId || "";
     markConversationRead(currentUser.id, state.currentConversationId);
+    syncRemoteReadState(state.currentConversationId);
     state.mobilePanel = "chat";
   } else {
     state.unreadMarker = null;
@@ -686,6 +779,7 @@ function openDeleteMessagesModal(messages) {
   if (!selectedMessages.length) {
     return;
   }
+  const allRemote = selectedMessages.every((message) => message.isRemote);
   const ownOnly = selectedMessages.every((message) => message.senderId === currentUser.id);
   openHtmlModal({
     kicker: "Apagar",
@@ -702,26 +796,50 @@ function openDeleteMessagesModal(messages) {
       </div>
     `,
     afterOpen: (scope) => {
-      scope.querySelector("#delete-for-me-btn")?.addEventListener("click", () => {
+      scope.querySelector("#delete-for-me-btn")?.addEventListener("click", async () => {
         const snapshot = exportState();
-        deleteMessages(currentUser.id, selectedMessages.map((message) => message.id), "self");
+        try {
+          if (allRemote) {
+            await Promise.all(selectedMessages.map((message) => hideMessageForMe(message.id)));
+            await syncRemoteChatData();
+          } else {
+            deleteMessages(currentUser.id, selectedMessages.map((message) => message.id), "self");
+          }
+        } catch (error) {
+          alert(error?.message || "Nao foi possivel apagar as mensagens para voce.");
+          return;
+        }
         state.selectionMode = false;
         state.selectedMessageIds = [];
         closeModal();
         renderAll();
-        showUndoToast("Mensagens apagadas para voce.", snapshot, state.currentConversationId);
+        if (!allRemote) {
+          showUndoToast("Mensagens apagadas para voce.", snapshot, state.currentConversationId);
+        }
       });
-      scope.querySelector("#delete-for-all-btn")?.addEventListener("click", () => {
+      scope.querySelector("#delete-for-all-btn")?.addEventListener("click", async () => {
         if (!confirm("Isso vai apagar as mensagens para todo mundo. Confirmar?")) {
           return;
         }
         const snapshot = exportState();
-        deleteMessages(currentUser.id, selectedMessages.map((message) => message.id), "everyone");
+        try {
+          if (allRemote) {
+            await Promise.all(selectedMessages.map((message) => deleteOwnMessage(message.id)));
+            await syncRemoteChatData();
+          } else {
+            deleteMessages(currentUser.id, selectedMessages.map((message) => message.id), "everyone");
+          }
+        } catch (error) {
+          alert(error?.message || "Nao foi possivel apagar as mensagens para todos.");
+          return;
+        }
         state.selectionMode = false;
         state.selectedMessageIds = [];
         closeModal();
         renderAll();
-        showUndoToast("Mensagens apagadas para todos.", snapshot, state.currentConversationId);
+        if (!allRemote) {
+          showUndoToast("Mensagens apagadas para todos.", snapshot, state.currentConversationId);
+        }
       });
     }
   });
@@ -1583,10 +1701,32 @@ function handleConversationMenuClick(event) {
     toastLabel = pinned ? "Conversa fixada no topo." : "Conversa desafixada.";
   }
   if (action === "toggle-archive") {
+    if (details.isRemote && details.threadId) {
+      setConversationArchived(details.threadId, !details.isArchived)
+        .then(() => syncRemoteChatData())
+        .then(() => {
+          state.openConversationMenu = false;
+          syncConversationSelection();
+          renderAll();
+        })
+        .catch((error) => alert(error?.message || "Nao foi possivel arquivar a conversa."));
+      return;
+    }
     const archived = toggleConversationArchived(currentUser.id, state.currentConversationId);
     toastLabel = archived ? "Conversa arquivada." : "Conversa desarquivada.";
   }
   if (action === "clear-history") {
+    if (details.isRemote && details.threadId) {
+      clearRemoteConversationForMe(details.threadId)
+        .then(() => syncRemoteChatData())
+        .then(() => {
+          state.openConversationMenu = false;
+          syncConversationSelection();
+          renderAll();
+        })
+        .catch((error) => alert(error?.message || "Nao foi possivel limpar essa conversa."));
+      return;
+    }
     clearConversationHistory(currentUser.id, state.currentConversationId);
     toastLabel = "Historico limpo desta conversa.";
   }
@@ -1694,6 +1834,7 @@ function selectConversation(conversationId) {
   clearReply();
   clearPending();
   markConversationRead(currentUser.id, conversationId);
+  syncRemoteReadState(conversationId);
   history.replaceState(null, "", `chat.html?c=${encodeURIComponent(conversationId)}`);
   renderAll();
   positionConversationViewport(firstUnreadMessageId);
@@ -1842,12 +1983,18 @@ function findMentionTargetByHandle(handle) {
   return listUsersForPicker(currentUser.id).find((user) => sanitizeUsernameInput(user.username) === normalizedHandle) || null;
 }
 
-function openMentionDirectChat(handle) {
+async function openMentionDirectChat(handle) {
   const targetUser = findMentionTargetByHandle(handle);
   if (!targetUser || targetUser.id === currentUser.id) {
     return;
   }
-  addContact(currentUser.id, targetUser.id);
+  try {
+    await upsertMyContact({ contactUserId: targetUser.id });
+    await createOrGetDirectConversation(targetUser.id);
+    await syncRemoteChatData();
+  } catch (error) {
+    console.error(error);
+  }
   selectConversation(getConversationIdForDirect(targetUser.id));
 }
 
@@ -1897,7 +2044,7 @@ function handleComposerKeydown(event) {
   }
 }
 
-function handleSend(event) {
+async function handleSend(event) {
   event.preventDefault();
   if (!state.currentConversationId) {
     return;
@@ -1910,24 +2057,45 @@ function handleSend(event) {
   if (!text && !state.pendingImages.length && !state.pendingDocs.length && !state.pendingAudio.length) {
     return;
   }
+  const details = getConversationDetails(currentUser.id, state.currentConversationId);
   try {
-    sendMessage(currentUser.id, state.currentConversationId, {
-      text,
-      replyTo: state.replyTo,
-      attachments: {
-        images: [...state.pendingImages],
-        docs: [...state.pendingDocs],
-        audio: state.pendingAudio.map((item) => {
-          const audio = normalizeAudioAttachment(item);
-          return {
-            url: audio.url,
-            mimeType: audio.mimeType,
-            duration: audio.duration,
-            waveform: audio.waveform
-          };
-        })
+    if (details?.isRemote) {
+      let conversationId = details.threadId;
+      if (!conversationId && details.type === "direct" && details.targetUser?.id) {
+        const remoteConversation = await createOrGetDirectConversation(details.targetUser.id);
+        conversationId = remoteConversation.id;
       }
-    });
+      if (!conversationId) {
+        throw new Error("Conversa remota indisponivel");
+      }
+      const uploaded = await uploadPendingRemoteAttachments(conversationId);
+      await sendRemoteMessage({
+        conversationId,
+        text,
+        replyTo: state.replyTo,
+        attachments: uploaded.attachments,
+        metadata: uploaded.metadata
+      });
+      await syncRemoteChatData();
+    } else {
+      sendMessage(currentUser.id, state.currentConversationId, {
+        text,
+        replyTo: state.replyTo,
+        attachments: {
+          images: [...state.pendingImages],
+          docs: [...state.pendingDocs],
+          audio: state.pendingAudio.map((item) => {
+            const audio = normalizeAudioAttachment(item);
+            return {
+              url: audio.url,
+              mimeType: audio.mimeType,
+              duration: audio.duration,
+              waveform: audio.waveform
+            };
+          })
+        }
+      });
+    }
   } catch {
     alert("Nao foi possivel enviar a mensagem. Tente reduzir o tamanho da imagem ou limpar dados antigos.");
     return;
@@ -2257,21 +2425,45 @@ function handleMessageClick(event) {
     return;
   }
   if (action === "pin") {
-    togglePinned(currentUser.id, messageId);
+    const message = getMessagesForConversation(currentUser.id, state.currentConversationId).find((item) => item.id === messageId);
     state.openReactionPickerId = null;
-    renderConversation();
+    if (message?.isRemote) {
+      setPinnedMessage({ conversationId: message.threadId, messageId })
+        .then(() => syncRemoteChatData())
+        .then(() => renderConversation())
+        .catch((error) => alert(error?.message || "Nao foi possivel fixar a mensagem."));
+    } else {
+      togglePinned(currentUser.id, messageId);
+      renderConversation();
+    }
     return;
   }
   if (action === "favorite") {
-    toggleFavorite(currentUser.id, messageId);
+    const message = getMessagesForConversation(currentUser.id, state.currentConversationId).find((item) => item.id === messageId);
     state.openReactionPickerId = null;
-    renderConversation();
+    if (message?.isRemote) {
+      toggleMessageFavorite(messageId)
+        .then(() => syncRemoteChatData())
+        .then(() => renderConversation())
+        .catch((error) => alert(error?.message || "Nao foi possivel favoritar a mensagem."));
+    } else {
+      toggleFavorite(currentUser.id, messageId);
+      renderConversation();
+    }
     return;
   }
   if (action === "react") {
-    toggleReaction(currentUser.id, messageId, target.dataset.reaction);
+    const message = getMessagesForConversation(currentUser.id, state.currentConversationId).find((item) => item.id === messageId);
     state.openReactionPickerId = null;
-    renderConversation();
+    if (message?.isRemote) {
+      setMessageReaction(messageId, target.dataset.reaction)
+        .then(() => syncRemoteChatData())
+        .then(() => renderConversation())
+        .catch((error) => alert(error?.message || "Nao foi possivel reagir a essa mensagem."));
+    } else {
+      toggleReaction(currentUser.id, messageId, target.dataset.reaction);
+      renderConversation();
+    }
   }
 }
 
@@ -2292,12 +2484,41 @@ function handleDrawerClick(event) {
     openAddMembersModal(details);
   }
   if (action === "toggle-admin") {
+    if (details.isRemote) {
+      const member = getGroupMembers(details.threadId, currentUser.id).find((item) => item.id === button.dataset.userId);
+      const nextRole = details.admins.includes(button.dataset.userId) ? "member" : "admin";
+      setMemberRole(details.threadId, button.dataset.userId, nextRole)
+        .then(() => sendRemoteMessage({
+          conversationId: details.threadId,
+          kind: "system",
+          text: nextRole === "admin"
+            ? `${currentUser.name} promoveu ${member?.name || "um membro"} para admin.`
+            : `${currentUser.name} removeu o cargo de admin de ${member?.name || "um membro"}.`
+        }))
+        .then(() => syncRemoteChatData())
+        .then(() => renderAll())
+        .catch((error) => alert(error?.message || "Nao foi possivel atualizar o cargo do membro."));
+      return;
+    }
     const result = toggleGroupAdmin(currentUser.id, details.threadId, button.dataset.userId);
     if (!result.ok) alert(result.error);
     renderAll();
   }
   if (action === "remove-member") {
     if (!confirm("Remover este membro do grupo?")) {
+      return;
+    }
+    if (details.isRemote) {
+      const member = getGroupMembers(details.threadId, currentUser.id).find((item) => item.id === button.dataset.userId);
+      removeRemoteGroupMember(details.threadId, button.dataset.userId)
+        .then(() => sendRemoteMessage({
+          conversationId: details.threadId,
+          kind: "system",
+          text: `${currentUser.name} removeu ${member?.name || "um membro"} do grupo.`
+        }))
+        .then(() => syncRemoteChatData())
+        .then(() => renderAll())
+        .catch((error) => alert(error?.message || "Nao foi possivel remover esse membro."));
       return;
     }
     const result = removeGroupMember(currentUser.id, details.threadId, button.dataset.userId);
@@ -2309,6 +2530,16 @@ function handleDrawerClick(event) {
   }
   if (action === "leave-group") {
     if (!confirm("Sair deste grupo?")) {
+      return;
+    }
+    if (details.isRemote) {
+      removeRemoteGroupMember(details.threadId, currentUser.id)
+        .then(() => syncRemoteChatData())
+        .then(() => {
+          selectInitialConversation();
+          renderAll();
+        })
+        .catch((error) => alert(error?.message || "Nao foi possivel sair do grupo."));
       return;
     }
     const result = removeGroupMember(currentUser.id, details.threadId, currentUser.id);
@@ -2432,7 +2663,26 @@ async function handleLogout() {
 function openEditMessageModal(messageId) {
   const message = getMessagesForConversation(currentUser.id, state.currentConversationId).find((item) => item.id === messageId);
   if (!message) return;
-  openFormModal({ kicker: "Mensagem", title: "Editar mensagem", fields: `<label class="field"><span>Texto</span><textarea name="text" rows="5">${escapeHtml(message.text)}</textarea></label>`, submitLabel: "Salvar", onSubmit: (form) => { updateMessage(currentUser.id, messageId, form.get("text")); closeModal(); renderAll(); } });
+  openFormModal({
+    kicker: "Mensagem",
+    title: "Editar mensagem",
+    fields: `<label class="field"><span>Texto</span><textarea name="text" rows="5">${escapeHtml(message.text)}</textarea></label>`,
+    submitLabel: "Salvar",
+    onSubmit: async (form) => {
+      try {
+        if (message.isRemote) {
+          await editOwnMessage(messageId, form.get("text"));
+          await syncRemoteChatData();
+        } else {
+          updateMessage(currentUser.id, messageId, form.get("text"));
+        }
+        closeModal();
+        renderAll();
+      } catch (error) {
+        alert(error?.message || "Nao foi possivel editar a mensagem.");
+      }
+    }
+  });
 }
 
 function openAddContactModal() {
@@ -2455,7 +2705,9 @@ function openAddContactModal() {
       const feedback = scope.querySelector("#contact-search-feedback");
       const results = scope.querySelector("#contact-search-results");
       const selected = scope.querySelector("#contact-selected-user");
-      const renderResults = () => {
+      let requestToken = 0;
+      const renderResults = async () => {
+        const token = ++requestToken;
         const query = sanitizeUsernameInput(input.value);
         input.value = query;
         results.innerHTML = "";
@@ -2465,7 +2717,17 @@ function openAddContactModal() {
           feedback.textContent = "Digite o usuario para localizar a conta.";
           return;
         }
-        const matches = searchUsersByUsername(currentUser.id, query);
+        feedback.textContent = "Buscando contas...";
+        let matches = [];
+        try {
+          matches = await searchProfiles(query);
+        } catch {
+          feedback.textContent = "Nao foi possivel buscar contas agora.";
+          return;
+        }
+        if (token !== requestToken) {
+          return;
+        }
         if (!matches.length) {
           feedback.textContent = "Nenhuma conta encontrada com esse usuario.";
           return;
@@ -2495,19 +2757,22 @@ function openAddContactModal() {
       input.addEventListener("input", renderResults);
       input.focus();
     },
-    onSubmit: (form) => {
+    onSubmit: async (form) => {
       const targetUserId = form.get("targetUserId");
       if (!targetUserId) {
         alert("Selecione um usuario valido para adicionar.");
         return;
       }
-      const result = addContact(currentUser.id, targetUserId);
-      if (!result.ok) {
-        alert(result.error);
+      try {
+        await upsertMyContact({ contactUserId: targetUserId });
+        await createOrGetDirectConversation(targetUserId);
+        await syncRemoteChatData();
+      } catch (error) {
+        alert(error?.message || "Nao foi possivel adicionar esse contato.");
         return;
       }
       closeModal();
-      selectConversation(`direct:${result.user.id}`);
+      selectConversation(`direct:${targetUserId}`);
     }
   });
 }
@@ -2556,16 +2821,34 @@ function openCreateGroupModal() {
         }
       });
     },
-    onSubmit: (form) => {
-      const result = createGroup(currentUser.id, {
-        title: form.get("title"),
-        description: form.get("description"),
-        memberIds: form.getAll("member"),
-        photo: pendingPhoto
-      });
-      if (!result.ok) { alert(result.error); return; }
-      closeModal();
-      selectConversation(`group:${result.thread.id}`);
+    onSubmit: async (form) => {
+      const title = String(form.get("title") || "").trim();
+      if (!title) {
+        alert("Defina um nome para o grupo.");
+        return;
+      }
+      try {
+        const conversation = await createGroupConversation({
+          title,
+          description: form.get("description"),
+          memberIds: form.getAll("member")
+        });
+        if (pendingPhoto) {
+          const photoFile = await dataUrlToFile(pendingPhoto, `group-photo-${Date.now()}.jpg`, "image/jpeg");
+          const uploaded = await uploadConversationPhoto(conversation.id, photoFile);
+          await updateGroupConversation(conversation.id, { photoUrl: uploaded.url });
+        }
+        await sendRemoteMessage({
+          conversationId: conversation.id,
+          kind: "system",
+          text: `${currentUser.name} criou o grupo.`
+        });
+        await syncRemoteChatData();
+        closeModal();
+        selectConversation(`group:${conversation.id}`);
+      } catch (error) {
+        alert(error?.message || "Nao foi possivel criar o grupo.");
+      }
     }
   });
 }
@@ -2617,17 +2900,40 @@ function openEditGroupModal(details) {
         }
       });
     },
-    onSubmit: (form) => {
-      const result = updateGroup(currentUser.id, details.threadId, {
-        title: form.get("title"),
-        description: form.get("description"),
-        avatar: form.get("avatar"),
-        photo: pendingPhoto || undefined,
-        clearPhoto: pendingPhoto === ""
-      });
-      if (!result.ok) { alert(result.error); return; }
-      closeModal();
-      renderAll();
+    onSubmit: async (form) => {
+      try {
+        if (details.isRemote) {
+          const patch = {
+            title: form.get("title"),
+            description: form.get("description")
+          };
+          if (pendingPhoto) {
+            const photoFile = await dataUrlToFile(pendingPhoto, `group-photo-${Date.now()}.jpg`, "image/jpeg");
+            const uploaded = await uploadConversationPhoto(details.threadId, photoFile);
+            patch.photoUrl = uploaded.url;
+          }
+          await updateGroupConversation(details.threadId, patch);
+          await sendRemoteMessage({
+            conversationId: details.threadId,
+            kind: "system",
+            text: `${currentUser.name} atualizou as informacoes do grupo.`
+          });
+          await syncRemoteChatData();
+        } else {
+          const result = updateGroup(currentUser.id, details.threadId, {
+            title: form.get("title"),
+            description: form.get("description"),
+            avatar: form.get("avatar"),
+            photo: pendingPhoto || undefined,
+            clearPhoto: pendingPhoto === ""
+          });
+          if (!result.ok) { alert(result.error); return; }
+        }
+        closeModal();
+        renderAll();
+      } catch (error) {
+        alert(error?.message || "Nao foi possivel atualizar o grupo.");
+      }
     }
   });
 }
@@ -2645,11 +2951,31 @@ function openAddMembersModal(details) {
       : '<div class="empty-block">Nao ha mais usuarios disponiveis.</div>',
     submitLabel: "Adicionar",
     afterOpen: () => wireMemberSearch(users),
-    onSubmit: (form) => {
-      const result = addGroupMembers(currentUser.id, details.threadId, form.getAll("member"));
-      if (!result.ok) { alert(result.error); return; }
-      closeModal();
-      renderAll();
+    onSubmit: async (form) => {
+      const memberIds = form.getAll("member");
+      try {
+        if (details.isRemote) {
+          await addRemoteGroupMembers(details.threadId, memberIds);
+          if (memberIds.length) {
+            const names = memberIds
+              .map((memberId) => listUsersForPicker(currentUser.id).find((item) => item.id === memberId)?.name)
+              .filter(Boolean);
+            await sendRemoteMessage({
+              conversationId: details.threadId,
+              kind: "system",
+              text: `${currentUser.name} adicionou ${names.join(", ") || "novos membros"} ao grupo.`
+            });
+          }
+          await syncRemoteChatData();
+        } else {
+          const result = addGroupMembers(currentUser.id, details.threadId, memberIds);
+          if (!result.ok) { alert(result.error); return; }
+        }
+        closeModal();
+        renderAll();
+      } catch (error) {
+        alert(error?.message || "Nao foi possivel adicionar membros.");
+      }
     }
   });
 }
@@ -2768,6 +3094,81 @@ function clearPending() {
   state.pendingAudio = [];
   state.recordingLevels = [];
   state.recordingWaveform = [];
+}
+
+function extensionForMimeType(mimeType, fallback = "bin") {
+  const normalized = String(mimeType || "").toLowerCase();
+  if (normalized.includes("jpeg")) return "jpg";
+  if (normalized.includes("png")) return "png";
+  if (normalized.includes("gif")) return "gif";
+  if (normalized.includes("webp")) return "webp";
+  if (normalized.includes("pdf")) return "pdf";
+  if (normalized.includes("json")) return "json";
+  if (normalized.includes("plain")) return "txt";
+  if (normalized.includes("mpeg")) return "mp3";
+  if (normalized.includes("ogg")) return "ogg";
+  if (normalized.includes("wav")) return "wav";
+  if (normalized.includes("webm")) return "webm";
+  return fallback;
+}
+
+async function dataUrlToFile(source, fileName, fallbackType = "application/octet-stream") {
+  const response = await fetch(source);
+  const blob = await response.blob();
+  const type = blob.type || fallbackType;
+  return new File([blob], fileName, { type });
+}
+
+async function uploadPendingRemoteAttachments(conversationId) {
+  const attachments = [];
+  const metadata = {};
+
+  for (const [index, source] of state.pendingImages.entries()) {
+    const file = await dataUrlToFile(source, `image-${Date.now()}-${index + 1}.jpg`, "image/jpeg");
+    const uploaded = await uploadMessageAttachment(conversationId, file);
+    attachments.push({
+      type: "image",
+      fileName: file.name,
+      filePath: uploaded.path,
+      publicUrl: uploaded.url
+    });
+  }
+
+  for (const [index, doc] of state.pendingDocs.entries()) {
+    const originalName = String(doc?.name || `documento-${index + 1}`);
+    const file = await dataUrlToFile(doc.url, originalName);
+    const uploaded = await uploadMessageAttachment(conversationId, file);
+    attachments.push({
+      type: "document",
+      fileName: file.name,
+      filePath: uploaded.path,
+      publicUrl: uploaded.url
+    });
+  }
+
+  for (const [index, item] of state.pendingAudio.entries()) {
+    const audio = normalizeAudioAttachment(item);
+    const extension = extensionForMimeType(audio.mimeType, "webm");
+    const fileName = `audio-${Date.now()}-${index + 1}.${extension}`;
+    const file = await dataUrlToFile(audio.url, fileName, audio.mimeType || "audio/webm");
+    const uploaded = await uploadMessageAttachment(conversationId, file);
+    attachments.push({
+      type: "audio",
+      fileName: file.name,
+      filePath: uploaded.path,
+      publicUrl: uploaded.url
+    });
+    if (!metadata.audio || typeof metadata.audio !== "object") {
+      metadata.audio = {};
+    }
+    metadata.audio[file.name] = {
+      duration: audio.duration || 0,
+      waveform: Array.isArray(audio.waveform) ? audio.waveform : [],
+      mimeType: audio.mimeType || file.type || "audio/webm"
+    };
+  }
+
+  return { attachments, metadata };
 }
 
 function setComposerEnabled(enabled) {

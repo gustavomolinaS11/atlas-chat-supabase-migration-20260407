@@ -7,14 +7,27 @@ export async function getMyProfile() {
   const userId = auth.user?.id;
   if (!userId) return null;
 
-  const { data, error } = await supabase
-    .from('profiles')
-    .select('*')
-    .eq('id', userId)
-    .single();
+  const [{ data: profile, error: profileError }, { data: preferences, error: preferencesError }] = await Promise.all([
+    supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', userId)
+      .single(),
+    supabase
+      .from('user_settings')
+      .select('settings, privacy')
+      .eq('user_id', userId)
+      .single()
+  ]);
 
-  if (error) throw error;
-  return mapProfile(data);
+  if (profileError) throw profileError;
+  if (preferencesError) throw preferencesError;
+
+  return mapProfile({
+    ...profile,
+    settings: preferences?.settings || {},
+    privacy: preferences?.privacy || {}
+  });
 }
 
 export async function updateMyProfile(patch) {

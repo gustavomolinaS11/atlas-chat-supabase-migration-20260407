@@ -20,9 +20,15 @@ import {
   requireSession,
   saveSettings,
   searchMessagesForUser,
+  upsertRemoteSessionUser,
   updateUserProfile
 } from "./store.js";
 import { getCurrentSession as getRemoteSession, signOutUser as signOutRemoteUser } from "./src/services/remote/authService.js";
+import {
+  getMyProfile,
+  updateMyProfile as updateRemoteProfile,
+  updateMySettings as updateRemoteSettings
+} from "./src/services/remote/profileService.js";
 
 const currentUser = requireSession("index.html");
 
@@ -75,6 +81,7 @@ const elements = {
 
 let settings = currentUser ? getSettings(currentUser.id) : null;
 let pendingProfilePhoto = null;
+let remoteSettingsTimer = null;
 
 init();
 
@@ -88,6 +95,7 @@ async function init() {
     return;
   }
   await ensureStore();
+  await syncRemoteProfile(remoteSession.user);
   settings = getSettings(currentUser.id);
   if (elements.mobileBackLink) {
     elements.mobileBackLink.innerHTML = ICONS.arrowLeft;
@@ -96,6 +104,17 @@ async function init() {
   applyDisplayPreferences(settings);
   bindEvents();
   renderAll();
+}
+
+async function syncRemoteProfile(authUser) {
+  try {
+    const profile = await getMyProfile();
+    if (profile) {
+      upsertRemoteSessionUser(profile, authUser);
+    }
+  } catch (error) {
+    console.error(error);
+  }
 }
 
 async function logoutLocalAndRedirect() {
@@ -288,6 +307,7 @@ function renderSearchResults() {
 function handleSaturation(event) {
   settings = { ...settings, saturation: Number(event.target.value) };
   saveSettings(currentUser.id, settings);
+  queueRemoteSettingsSync();
   applyTheme(settings);
   applyDisplayPreferences(settings);
 }
@@ -295,6 +315,7 @@ function handleSaturation(event) {
 function handleModeToggle() {
   settings = { ...settings, mode: settings.mode === "dark" ? "light" : "dark" };
   saveSettings(currentUser.id, settings);
+  queueRemoteSettingsSync();
   applyTheme(settings);
   applyDisplayPreferences(settings);
   renderModeToggle();
@@ -316,6 +337,7 @@ function handleDisplaySettingsChange() {
     blurMedia: elements.blurMedia.checked
   };
   saveSettings(currentUser.id, settings);
+  queueRemoteSettingsSync();
   applyTheme(settings);
   applyDisplayPreferences(settings);
 }
@@ -345,7 +367,7 @@ function handleProfilePhotoRemove() {
   }
 }
 
-function handleProfileSave() {
+async function handleProfileSave() {
   try {
     const result = updateUserProfile(currentUser.id, {
       name: elements.profileName.value,
@@ -357,6 +379,14 @@ function handleProfileSave() {
       alert(result.error);
       return;
     }
+    const remoteProfile = await updateRemoteProfile({
+      name: elements.profileName.value.trim(),
+      bio: elements.profileBio.value.trim(),
+      avatarUrl: pendingProfilePhoto === null
+        ? (getCurrentUser()?.photo || "")
+        : pendingProfilePhoto
+    });
+    upsertRemoteSessionUser(remoteProfile);
     pendingProfilePhoto = null;
     renderAll();
   } catch {
@@ -375,6 +405,7 @@ function handlePrivacyChange() {
     }
   };
   saveSettings(currentUser.id, settings);
+  queueRemoteSettingsSync();
 }
 
 function renderModeToggle() {
@@ -427,6 +458,7 @@ function handleResetSettings() {
   }
   settings = getDefaultSettings();
   saveSettings(currentUser.id, settings);
+  queueRemoteSettingsSync();
   applyTheme(settings);
   applyDisplayPreferences(settings);
   renderAll();
@@ -439,6 +471,37 @@ async function handleReset() {
   clearAllData();
   await ensureStore();
   window.location.href = "index.html";
+}
+
+function queueRemoteSettingsSync() {
+  window.clearTimeout(remoteSettingsTimer);
+  remoteSettingsTimer = window.setTimeout(async () => {
+    try {
+      await updateRemoteSettings({
+        settings: {
+          mode: settings.mode,
+          accent: settings.accent,
+          accentAlt: settings.accentAlt,
+          saturation: settings.saturation,
+          fontScale: settings.fontScale,
+          bubbleSize: settings.bubbleSize,
+          compactMode: settings.compactMode,
+          showAvatars: settings.showAvatars,
+          showMessageTime: settings.showMessageTime,
+          showTypingIndicator: settings.showTypingIndicator,
+          enterToSend: settings.enterToSend,
+          showSidebarPreview: settings.showSidebarPreview,
+          showReactionBar: settings.showReactionBar,
+          blurMedia: settings.blurMedia,
+          wideBubbles: settings.wideBubbles,
+          wallpaperGlow: settings.wallpaperGlow
+        },
+        privacy: settings.privacy
+      });
+    } catch (error) {
+      console.error(error);
+    }
+  }, 260);
 }
 
 function paintAvatar(element, user) {

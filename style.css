@@ -169,6 +169,7 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
   background: var(--panel);
   box-shadow: var(--shadow);
   backdrop-filter: blur(18px);
+  animation: shell-enter 0.24s ease both;
 }
 .auth-hero, .auth-panel, .sidebar, .chat-shell, .details-drawer, .settings-sidebar, .settings-main { padding: 24px; }
 .auth-hero { display: grid; align-content: space-between; }
@@ -198,6 +199,40 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .auth-tab.active { background: linear-gradient(135deg, rgba(53, 194, 255, 0.2), rgba(69, 224, 177, 0.18)); border-color: rgba(53, 194, 255, 0.28); }
 .auth-form { display: grid; gap: 14px; }
 .auth-feedback { min-height: 18px; margin: 14px 0 0; color: #ffd2d4; }
+.auth-remember-row { margin-top: -2px; }
+
+@keyframes shell-enter {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.992);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes panel-slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes sheet-rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(28px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
 
 .chat-app, .settings-shell {
   min-height: 100dvh;
@@ -475,6 +510,7 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
   background: var(--panel-strong);
   box-shadow: var(--shadow);
   backdrop-filter: blur(18px);
+  animation: shell-enter 0.18s ease both;
 }
 .context-menu-item {
   width: 100%;
@@ -1458,7 +1494,7 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .modal-layer {
   position: fixed;
   inset: 0;
-  z-index: 40;
+  z-index: 60;
   display: grid;
   place-items: center;
   background: rgba(0, 0, 0, 0.58);
@@ -1592,7 +1628,7 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .camera-layer {
   position: fixed;
   inset: 0;
-  z-index: 55;
+  z-index: 70;
   display: grid;
   place-items: center;
   padding: 18px;
@@ -1607,6 +1643,7 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
   border-radius: 28px;
   background: var(--panel-strong);
   box-shadow: var(--shadow);
+  animation: sheet-rise-in 0.22s ease both;
 }
 .camera-head,
 .camera-actions,
@@ -1839,7 +1876,7 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
     content: "";
     position: fixed;
     inset: 0;
-    z-index: 18;
+    z-index: 24;
     background: rgba(3, 8, 16, 0.42);
     backdrop-filter: blur(6px);
     pointer-events: none;
@@ -1867,13 +1904,16 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
   .page-chat .sidebar {
     display: grid;
     overflow: hidden;
+    z-index: 20;
   }
   .page-chat .chat-shell,
   .page-chat .details-drawer {
     display: none;
+    z-index: 22;
   }
   .page-chat.mobile-view-list .sidebar {
     display: grid;
+    animation: panel-slide-in 0.2s ease both;
   }
   .page-chat.mobile-view-chat .sidebar,
   .page-chat.mobile-view-details .sidebar,
@@ -1882,11 +1922,13 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
   }
   .page-chat.mobile-view-chat .chat-shell {
     display: flex;
+    animation: panel-slide-in 0.2s ease both;
   }
   .page-chat.mobile-view-details .details-drawer {
     display: flex;
     flex-direction: column;
     overflow: auto;
+    animation: panel-slide-in 0.2s ease both;
   }
   .page-chat .chat-header {
     align-items: center;
@@ -1905,6 +1947,13 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
     display: inline-flex;
     flex: 0 0 auto;
   }
+  .page-chat.quick-create-open .sidebar {
+    z-index: 30;
+  }
+  .page-chat .quick-create-wrap {
+    position: relative;
+    z-index: 34;
+  }
   .page-chat .quick-create-wrap .quick-create-menu {
     position: fixed;
     left: 12px;
@@ -1912,10 +1961,11 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
     top: auto;
     bottom: 12px;
     width: auto;
-    z-index: 24;
+    z-index: 40;
     border-radius: 24px;
     padding: 12px;
     gap: 10px;
+    animation: sheet-rise-in 0.2s ease both;
   }
   .page-chat .quick-create-wrap .quick-create-item {
     min-height: 62px;
@@ -1957,6 +2007,9 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
   }
   .settings-mobile-bar {
     display: flex;
+  }
+  #export-btn {
+    display: none !important;
   }
   .settings-head {
     display: none;

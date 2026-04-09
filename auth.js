@@ -10,6 +10,10 @@ import {
   signUpWithEmail
 } from "./src/services/remote/authService.js";
 import { getMyProfile } from "./src/services/remote/profileService.js";
+import {
+  isRememberMeEnabled,
+  setRememberMeEnabled
+} from "./src/lib/sessionPersistence.js";
 
 const elements = {
   loginTab: document.getElementById("login-tab"),
@@ -19,6 +23,7 @@ const elements = {
   feedback: document.getElementById("auth-feedback"),
   loginIdentifier: document.getElementById("login-identifier"),
   loginPassword: document.getElementById("login-password"),
+  rememberMe: document.getElementById("remember-me"),
   registerName: document.getElementById("register-name"),
   registerUsername: document.getElementById("register-username"),
   registerEmail: document.getElementById("register-email"),
@@ -60,6 +65,7 @@ function setPending(kind, pending) {
   elements.registerSubmit.disabled = pending;
   elements.loginIdentifier.disabled = pending;
   elements.loginPassword.disabled = pending;
+  elements.rememberMe.disabled = pending;
   elements.registerName.disabled = pending;
   elements.registerUsername.disabled = pending;
   elements.registerEmail.disabled = pending;
@@ -89,7 +95,7 @@ function normalizeAuthError(error) {
     return "Username ja existe.";
   }
   if (normalized.includes("email not confirmed")) {
-    return "O email ainda nao foi confirmado no Supabase.";
+    return "O email ainda nao foi confirmado.";
   }
   return raw;
 }
@@ -135,7 +141,7 @@ async function syncRemoteSession() {
     window.location.href = "chat.html";
   } catch (error) {
     console.error(error);
-    setFeedback("Nao foi possivel validar a sessao do Supabase.");
+    setFeedback("Nao foi possivel validar a sessao.");
   }
 }
 
@@ -165,9 +171,10 @@ async function handleLogin(event) {
   }
   const identifier = String(elements.loginIdentifier.value || "").trim().toLowerCase();
   if (!identifier.includes("@")) {
-    setFeedback("No Supabase, entre com email. O login por usuario entra depois.");
+    setFeedback("Entre com email.");
     return;
   }
+  setRememberMeEnabled(elements.rememberMe.checked);
   setFeedback("Validando credenciais...");
   setPending("login", true);
   try {
@@ -200,9 +207,10 @@ async function handleRegister(event) {
     setFeedback("Usuario sem acentos ou espacos. Use ao menos 3 caracteres.");
     return;
   }
-  setFeedback("Criando conta no Supabase...");
+  setFeedback("Criando conta...");
   setPending("register", true);
   try {
+    setRememberMeEnabled(elements.rememberMe.checked);
     const signUpData = await signUpWithEmail({
       name: elements.registerName.value.trim(),
       username,
@@ -212,7 +220,7 @@ async function handleRegister(event) {
     const authUser = signUpData.user;
     const sessionUser = signUpData.session?.user || authUser;
     if (!sessionUser) {
-      setFeedback("Conta criada, mas a sessao nao foi aberta. Se o login nao entrar sozinho, a confirmacao de email ainda esta ligada no Supabase.");
+      setFeedback("Conta criada, mas a sessao nao foi aberta. O email ainda precisa ser confirmado.");
       return;
     }
     await finalizeRemoteSession(sessionUser);
@@ -227,3 +235,5 @@ async function handleRegister(event) {
     setPending("register", false);
   }
 }
+
+elements.rememberMe.checked = isRememberMeEnabled();
