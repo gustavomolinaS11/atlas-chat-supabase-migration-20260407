@@ -79,6 +79,7 @@ import {
   uploadConversationPhoto,
   uploadMessageAttachment
 } from "./src/services/remote/storageService.js";
+import { supabase } from "./src/lib/supabaseClient.js";
 
 const currentUser = requireSession("index.html");
 let userSettings = currentUser ? getSettings(currentUser.id) : null;
@@ -91,6 +92,18 @@ const REACTIONS = [
 ];
 
 const AUDIO_SPEEDS = [1, 1.5, 2];
+const REMOTE_REALTIME_TABLES = [
+  "conversations",
+  "conversation_members",
+  "user_contacts",
+  "messages",
+  "message_attachments",
+  "message_mentions",
+  "message_hidden_for",
+  "message_reactions",
+  "message_favorites",
+  "conversation_pins"
+];
 
 const ICONS = {
   arrowLeft: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/><path d="M9 12h10"/></svg>',
@@ -238,7 +251,11 @@ const state = {
   mobilePanel: "list",
   mentionSuggestions: [],
   mentionSelectedIndex: 0,
-  mentionQueryRange: null
+  mentionQueryRange: null,
+  remoteSyncTimer: null,
+  remoteSyncInFlight: null,
+  remoteSyncQueued: false,
+  realtimeChannel: null
 };
 
 init();
@@ -255,7 +272,7 @@ async function init() {
   }
   await ensureStore();
   await syncRemoteProfile(remoteSession.user);
-  await syncRemoteChatData();
+  await syncRemoteChatData({ rerender: false });
   syncUserSettings();
   markAllDeliveredForUser(currentUser.id);
   decorateStaticIcons();
@@ -266,6 +283,7 @@ async function init() {
     positionConversationViewport(state.pendingOpenMessageId);
   }
   state.pendingOpenMessageId = "";
+  setupRealtimeSync();
 }
 
 async function syncRemoteProfile(authUser) {
@@ -279,7 +297,18 @@ async function syncRemoteProfile(authUser) {
   }
 }
 
-async function syncRemoteChatData() {
+async function syncRemoteChatData(options = {}) {
+  const rerender = options.rerender !== false;
+  const preserveViewport = options.preserveViewport !== false;
+  if (state.remoteSyncInFlight) {
+    state.remoteSyncQueued = true;
+    return state.remoteSyncInFlight;
+  }
+  const shouldPreserveConversation = preserveViewport && Boolean(state.currentConversationId);
+  const keepBottom = shouldPreserveConversation ? isFeedNearBottom() : false;
+  const viewportAnchor = shouldPreserveConversation && !keepBottom ? captureFeedViewportAnchor() : null;
+
+  state.remoteSyncInFlight = (async () => {
   try {
     const contacts = await listMyContacts();
     const memberships = await listMyConversations();
@@ -306,9 +335,111 @@ async function syncRemoteChatData() {
       )
     });
     syncConversationSelection();
+    if (rerender) {
+      renderAll();
+      if (viewportAnchor && restoreFeedViewportAnchor(viewportAnchor)) {
+        return;
+      }
+      if (keepBottom && state.currentConversationId) {
+        scrollMessagesToBottom();
+      }
+    }
   } catch (error) {
     console.error(error);
   }
+  })();
+
+  try {
+    await state.remoteSyncInFlight;
+  } finally {
+    state.remoteSyncInFlight = null;
+    if (state.remoteSyncQueued) {
+      state.remoteSyncQueued = false;
+      queueRemoteChatSync(80);
+    }
+  }
+}
+
+function queueRemoteChatSync(delay = 120) {
+  if (!currentUser) {
+    return;
+  }
+  clearTimeout(state.remoteSyncTimer);
+  state.remoteSyncTimer = window.setTimeout(() => {
+    state.remoteSyncTimer = null;
+    syncRemoteChatData({ rerender: true, preserveViewport: true });
+  }, delay);
+}
+
+function setupRealtimeSync() {
+  teardownRealtimeSync();
+  const channel = supabase.channel(`atlas-chat-${currentUser.id}`);
+  REMOTE_REALTIME_TABLES.forEach((table) => {
+    channel.on(
+      "postgres_changes",
+      {
+        event: "*",
+        schema: "public",
+        table
+      },
+      () => {
+        queueRemoteChatSync(90);
+      }
+    );
+  });
+  channel.subscribe((status) => {
+    if (status === "SUBSCRIBED") {
+      queueRemoteChatSync(0);
+    }
+  });
+  state.realtimeChannel = channel;
+}
+
+function teardownRealtimeSync() {
+  clearTimeout(state.remoteSyncTimer);
+  state.remoteSyncTimer = null;
+  if (state.realtimeChannel) {
+    supabase.removeChannel(state.realtimeChannel);
+    state.realtimeChannel = null;
+  }
+}
+
+function isFeedNearBottom(threshold = 96) {
+  if (!elements.messages) {
+    return true;
+  }
+  const distance = elements.messages.scrollHeight - (elements.messages.scrollTop + elements.messages.clientHeight);
+  return distance <= threshold;
+}
+
+function captureFeedViewportAnchor() {
+  if (!elements.messages) {
+    return null;
+  }
+  const containerTop = elements.messages.getBoundingClientRect().top;
+  const nodes = [...elements.messages.querySelectorAll(".message[id^='msg-']")];
+  const anchor = nodes.find((node) => node.getBoundingClientRect().bottom >= containerTop + 8);
+  if (!anchor) {
+    return null;
+  }
+  return {
+    id: anchor.id.replace(/^msg-/, ""),
+    offsetTop: anchor.getBoundingClientRect().top - containerTop
+  };
+}
+
+function restoreFeedViewportAnchor(anchor) {
+  if (!anchor?.id || !elements.messages) {
+    return false;
+  }
+  const node = document.getElementById(`msg-${anchor.id}`);
+  if (!node) {
+    return false;
+  }
+  const containerTop = elements.messages.getBoundingClientRect().top;
+  const currentOffset = node.getBoundingClientRect().top - containerTop;
+  elements.messages.scrollTop += currentOffset - anchor.offsetTop;
+  return true;
 }
 
 function syncUserSettings() {
@@ -410,6 +541,7 @@ function bindEvents() {
     elements.cameraFallbackBtn.addEventListener("click", useCameraFileFallback);
     window.addEventListener("pageshow", refreshSessionState);
     window.addEventListener("beforeunload", flushPendingDraftSave);
+    window.addEventListener("pagehide", teardownRealtimeSync);
     window.addEventListener("resize", handleViewportChange);
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "visible") {
@@ -2651,6 +2783,7 @@ async function handleLogout() {
   cleanupRecordingMeter();
   stopRecordingStream();
   revokeAllPendingAudioPreviewUrls();
+  teardownRealtimeSync();
   try {
     await signOutRemoteUser();
   } catch (error) {
@@ -3597,4 +3730,5 @@ function formatConversationDayLabel(value) {
 function refreshSessionState() {
   syncUserSettings();
   renderAll();
+  queueRemoteChatSync(0);
 }

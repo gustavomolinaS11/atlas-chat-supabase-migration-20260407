@@ -336,7 +336,10 @@ drop policy if exists "members read conversations" on public.conversations;
 create policy "members read conversations"
 on public.conversations
 for select
-using (public.is_conversation_member(conversations.id, auth.uid()));
+using (
+  public.is_conversation_member(conversations.id, auth.uid())
+  or conversations.created_by = auth.uid()
+);
 
 drop policy if exists "authenticated create conversations" on public.conversations;
 create policy "authenticated create conversations"
