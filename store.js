@@ -67,13 +67,90 @@ const ASSISTANT_USER = {
   password: "__assistant__",
   avatar: "IA",
   photo: "",
-  bio: "Guia do Atlas: explica contatos, grupos, mencoes, audio, privacidade, atalhos e fluxo mobile.",
+  bio: "Guia do Atlas: conversa de forma natural e ajuda com contatos, grupos, mencoes, audio, privacidade, atalhos e fluxo mobile.",
   kind: "assistant",
   lastSeenAt: Date.now(),
   contactIds: [],
   pinnedConversationIds: [],
   contactEdits: {}
 };
+
+const ASSISTANT_TOPIC_DEFINITIONS = [
+  {
+    id: "groups",
+    label: "grupos",
+    patterns: [/\bgrupo\b/, /\bgrupos\b/, /\badmin\b/, /\bmembro\b/, /\bmembros\b/, /\bparticipante\b/, /\bparticipantes\b/, /\bpromov/, /\bremov.*grupo/, /foto do grupo/, /editar grupo/],
+    response: "Em grupos voce resolve tudo pelo painel de detalhes: editar nome, foto e descricao, ver membros, adicionar ou remover pessoas e trocar cargos de admin. Essas mudancas tambem aparecem como atualizacao dentro do chat."
+  },
+  {
+    id: "contacts",
+    label: "contatos",
+    patterns: [/\bcontato\b/, /\bcontatos\b/, /\busuario\b/, /\bagenda\b/, /adicionar contato/, /novo chat/, /\bperfil\b.*\badicionar\b/],
+    response: "Para contato, use o botao + e busque pelo usuario sem @. Se a pessoa estiver em um grupo com voce, tambem da para adicionar direto pela lista de membros."
+  },
+  {
+    id: "mentions",
+    label: "mencoes",
+    patterns: [/\bmenc/, /\bmarc/, /@/, /\bcitar\b/],
+    response: "Em grupos, digite @ que a lista de participantes abre na hora. Quem for marcado recebe destaque e a conversa fica sinalizada ate a mencao ser vista."
+  },
+  {
+    id: "conversation-management",
+    label: "organizacao da conversa",
+    patterns: [/\bfix/, /\bpin\b/, /\barquiv/, /\bhistor/, /\blimpar conversa/, /\btopo\b/],
+    response: "Voce pode fixar conversa no topo, arquivar para tirar da lista principal e limpar o seu historico sem mexer no restante do grupo ou do privado."
+  },
+  {
+    id: "message-delete",
+    label: "apagando mensagens",
+    patterns: [/\bapag/, /\bexclu/, /\bremov.*mensagem/, /apagar pra mim/, /apagar para mim/, /apagar pra todos/, /apagar para todos/],
+    response: "No apagar, existe diferenca entre apagar so para voce e apagar para todos quando a mensagem for sua. Isso vale tanto pelo menu quanto pela selecao multipla."
+  },
+  {
+    id: "reactions",
+    label: "reacoes e favoritos",
+    patterns: [/\bfavorit/, /\bestrela/, /\breag/, /\bemoji\b/, /\bcurti/, /\bpin\b.*mensagem/],
+    response: "Cada usuario pode deixar uma reacao por mensagem. Favoritos e pins continuam individuais, entao cada pessoa organiza o chat do proprio jeito."
+  },
+  {
+    id: "audio",
+    label: "audio",
+    patterns: [/\baudio\b/, /\bvoz\b/, /\bmicrofone\b/, /\bgravar\b/, /\bwave\b/, /\bonda\b/],
+    response: "Se o campo estiver vazio, o botao principal vira microfone. Voce grava, revisa e envia dali mesmo, sem sair do composer."
+  },
+  {
+    id: "media",
+    label: "camera e anexos",
+    patterns: [/\bcamera\b/, /\bfoto\b/, /\bimagem\b/, /\banexo\b/, /\barquivo\b/, /\bdocumento\b/, /\bupload\b/],
+    response: "Imagem, documento e camera saem do composer. Foto de grupo e avatar tambem entram nesse fluxo de upload e sincronizam com a conversa."
+  },
+  {
+    id: "settings",
+    label: "configuracoes e privacidade",
+    patterns: [/\btema\b/, /\bprivacidade\b/, /\bconfig/, /\bleitura\b/, /\bonline\b/, /\bvisto\b/, /\bultima vez\b/, /\bultimo acesso\b/, /\bfoto de perfil\b/, /\bperfil\b/],
+    response: "Em Configuracoes voce ajusta tema, privacidade, leitura, online, foto de perfil e comportamento visual. As regras de privacidade valem de forma reciproca."
+  },
+  {
+    id: "navigation",
+    label: "navegacao e mobile",
+    patterns: [/\bmobile\b/, /\bcelular\b/, /\bvoltar\b/, /\btela cheia\b/, /\bscroll\b/, /\bfim da conversa\b/, /\bseta\b/, /\bcomposer\b/, /\bgesto\b/, /\bswipe\b/, /\barrast/],
+    response: "No celular a conversa ocupa a tela toda, existe botao de voltar, gesto para responder e um atalho para voltar direto ao fim quando voce sobe o historico."
+  },
+  {
+    id: "sync",
+    label: "sincronizacao e desempenho",
+    patterns: [/\bsincron/, /\bdispositivo\b/, /\bpc\b/, /\bcomputador\b/, /\bcache\b/, /\brealtime\b/, /\bdelay\b/, /\blento\b/, /\btrav/, /\bperformance\b/],
+    response: "Hoje o chat sincroniza pelo Supabase. Quando algo parece lento, o ideal e mostrar primeiro na interface e deixar o banco confirmar em segundo plano."
+  },
+  {
+    id: "reply",
+    label: "respostas e busca",
+    patterns: [/\brespost/, /\breply\b/, /\bbuscar\b/, /\bmensagem original\b/, /\bpular\b/, /\bprivado\b/, /\bdm\b/, /\bconversa privada\b/],
+    response: "Voce pode responder mensagens, tocar na resposta para voltar na original, buscar dentro da conversa e abrir o privado ao tocar numa mencao."
+  }
+];
+
+const ASSISTANT_TOPIC_BY_ID = Object.fromEntries(ASSISTANT_TOPIC_DEFINITIONS.map((topic) => [topic.id, topic]));
 
 const DEFAULT_USERS = [
   { id: "u-gustavo", name: "Gustavo", username: "gustavo", email: "gustavo@atlas.local", password: "demo123", avatar: "GU", bio: "Owner", lastSeenAt: Date.now() - 12 * 60 * 1000, contactEdits: {} },
@@ -460,48 +537,97 @@ function isAssistantUser(user) {
   return Boolean(user && user.kind === "assistant");
 }
 
-function buildAssistantReplyText(text) {
-  const normalized = String(text || "").trim().toLowerCase();
+function normalizeAssistantText(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
+function collectAssistantTopics(messageText, attachments) {
+  const normalized = normalizeAssistantText(messageText);
+  const topicIds = new Set();
+  ASSISTANT_TOPIC_DEFINITIONS.forEach((topic) => {
+    if (topic.patterns.some((pattern) => pattern.test(normalized))) {
+      topicIds.add(topic.id);
+    }
+  });
+  if (attachments?.audio?.length) {
+    topicIds.add("audio");
+  }
+  if (attachments?.images?.length || attachments?.docs?.length) {
+    topicIds.add("media");
+  }
+  return [...topicIds].map((topicId) => ASSISTANT_TOPIC_BY_ID[topicId]).filter(Boolean);
+}
+
+function collectAssistantContextTopics(state, threadId, userId, currentMessageId) {
+  const collected = [];
+  const seen = new Set();
+  const history = state.messages
+    .filter((item) => item.threadId === threadId && item.id !== currentMessageId)
+    .slice(-8)
+    .reverse();
+  history.forEach((item) => {
+    if (item.senderId !== userId) {
+      return;
+    }
+    collectAssistantTopics(item.text, item.attachments).forEach((topic) => {
+      if (!seen.has(topic.id)) {
+        seen.add(topic.id);
+        collected.push(topic);
+      }
+    });
+  });
+  return collected.slice(0, 2);
+}
+
+function buildAssistantSocialIntro(normalized, hasTopics) {
+  if (/(^|\b)(oi|ola|opa|e ai|fala|salve|bom dia|boa tarde|boa noite)(\b|$)/.test(normalized)) {
+    return hasTopics ? "Oi. Peguei seu ponto." : "Oi. Pode falar comigo de forma natural.";
+  }
+  if (/\b(valeu|obrigad|tmj|fechou|show|boa)\b/.test(normalized)) {
+    return hasTopics ? "Boa. Vamos nessa." : "Boa. Se quiser continuar, eu acompanho o contexto.";
+  }
+  if (/\b(travou|travando|bugou|erro|lento|demora|ruim|nao foi|nao funciona|complicado)\b/.test(normalized)) {
+    return "Entendi. Vamos por partes.";
+  }
+  if (/\b(tudo bem|como voce ta|como vc ta|ta ai|kkk|haha|rs|correria|cansado|cansada|sono|estressado|estressada)\b/.test(normalized)) {
+    return hasTopics ? "Estou com voce." : "Estou por aqui. Posso conversar solto ou ir direto no ponto.";
+  }
+  return "";
+}
+
+function buildAssistantFallback(normalized, hasContextTopic) {
   if (!normalized) {
-    return "Posso te orientar sobre grupos, contatos, mencoes com @, audio, resposta por gesto, privacidade, configuracoes, sincronizacao entre dispositivos e atalhos do mobile.";
+    return "Posso conversar de forma natural e tambem te orientar sobre grupos, contatos, mencoes com @, audio, privacidade, sincronizacao, mobile e atalhos do Atlas.";
   }
-  if (/(grupo|admin|membro)/.test(normalized)) {
-    return "Grupos sao gerenciados no painel de detalhes. Admin pode editar grupo, trocar foto, adicionar membros, promover admin, remover cargo e retirar pessoas com confirmacao. Essas mudancas tambem aparecem como atualizacao dentro do chat.";
+  if (/\b(explica melhor|detalha|aprofunda|continua|destrincha|passo a passo)\b/.test(normalized) && hasContextTopic) {
+    return "Se quiser, eu detalho isso em passo a passo.";
   }
-  if (/(contato|usuario|adicionar|novo chat|\+)/.test(normalized)) {
-    return "No botao + da sidebar voce pode adicionar contato ou criar grupo. Para adicionar contato, basta buscar pelo usuario sem @ e selecionar a conta.";
+  if (/\b(ajuda|socorro|to perdido|estou perdido|me guia)\b/.test(normalized)) {
+    return "Me fala do jeito que vier. Se misturar mais de um assunto, eu separo por partes e sigo com voce.";
   }
-  if (/(menc|marc|@|citar)/.test(normalized)) {
-    return "Em grupos, digite @ para abrir a lista de participantes. Ao marcar alguem, a conversa ganha destaque ate a pessoa visualizar. Se voce foi marcado, o botao com seta acima do composer leva direto para a primeira mencao pendente.";
+  return "Posso seguir em conversa natural tambem. Se voce misturar mais de um assunto, eu separo e respondo por partes.";
+}
+
+function buildAssistantReplyText(state, thread, userId, message) {
+  const normalized = normalizeAssistantText(message?.text);
+  const explicitTopics = collectAssistantTopics(message?.text, message?.attachments);
+  const hasFollowUpTone = /\b(e no|e se|e isso|e essa|e esse|mas|tambem|outra coisa|nesse caso|continua|explica melhor|detalha|aprofunda)\b/.test(normalized);
+  const contextTopics = explicitTopics.length ? [] : collectAssistantContextTopics(state, thread.id, userId, message?.id);
+  const selectedTopics = explicitTopics.length ? explicitTopics.slice(0, 3) : (hasFollowUpTone ? contextTopics.slice(0, 2) : []);
+  const intro = buildAssistantSocialIntro(normalized, selectedTopics.length > 0);
+  if (selectedTopics.length > 1) {
+    const topicLines = selectedTopics.map((topic) => `- ${topic.label}: ${topic.response}`);
+    return [intro || "Peguei mais de um ponto aqui.", ...topicLines].filter(Boolean).join("\n");
   }
-  if (/(fix|pin|arquiv|histor)/.test(normalized)) {
-    return "No menu da conversa voce consegue fixar no topo, arquivar para tirar da lista principal e limpar o historico so para a sua conta.";
+  if (selectedTopics.length === 1) {
+    const prefix = hasFollowUpTone && !explicitTopics.length ? `Seguindo no assunto de ${selectedTopics[0].label}:` : "";
+    return [intro, prefix, selectedTopics[0].response].filter(Boolean).join(" ");
   }
-  if (/(apag|excluir|remov.*mensagem)/.test(normalized)) {
-    return "Ao apagar mensagem pelo menu ou pela selecao multipla, voce pode escolher entre apagar so para voce ou apagar para todos quando a mensagem for sua.";
-  }
-  if (/(favorit|estrela|reag)/.test(normalized)) {
-    return "Mensagens podem receber uma unica reacao por usuario. Favoritos ficam marcados com estrela e podem ser consultados em Configuracoes.";
-  }
-  if (/(audio|voz|microfone|onda|wave)/.test(normalized)) {
-    return "Para gravar audio, use o microfone no composer. O preview fica no proprio chat com waveform, controle de velocidade e envio direto pelo botao principal.";
-  }
-  if (/(camera|foto na hora|imagem)/.test(normalized)) {
-    return "Ao lado do envio de imagem existe a camera. No celular ela pode abrir captura direta; no app tambem existe preview da camera antes de anexar a foto.";
-  }
-  if (/(tema|privacidade|config|perfil|foto)/.test(normalized)) {
-    return "Em Configuracoes voce ajusta tema, foto, privacidade, leitura, comportamento visual, tamanho dos baloes, favoritos, pins e preferencias das conversas.";
-  }
-  if (/(respost|reply|mensagem|pular|buscar|privado)/.test(normalized)) {
-    return "Voce pode responder mensagens, clicar na resposta para pular ate a original, buscar dentro da conversa e, em grupos, tocar numa @mencao para abrir o chat privado da pessoa.";
-  }
-  if (/(mobile|celular|voltar|tela cheia)/.test(normalized)) {
-    return "No celular a lista de conversas vira a tela principal. Ao abrir um chat, a conversa ocupa a tela toda, existe botao de voltar e agora tambem um atalho para voltar direto ao fim quando voce sobe o historico.";
-  }
-  if (/(^|\b)(oi|ola|hello|ajuda)(\b|$)/.test(normalized)) {
-    return "Oi. Eu sou a IA do Atlas. Posso te explicar conversas privadas, grupos, contatos, mencoes, audio, sincronizacao, configuracoes e atalhos do sistema.";
-  }
-  return "Eu consigo te orientar sobre contatos, conversas privadas, grupos, mencoes, audio, pins, arquivamento, favoritos, privacidade, camera, sincronizacao e configuracoes da interface.";
+  return [intro, buildAssistantFallback(normalized, contextTopics.length > 0)].filter(Boolean).join(" ");
 }
 
 function seedAssistantConversation(state, userId) {
@@ -535,7 +661,7 @@ function seedAssistantConversation(state, userId) {
       id: uid("m"),
       threadId: thread.id,
       senderId: ASSISTANT_USER_ID,
-      text: `Oi, ${user.name}. Eu sou a IA do Atlas e vou te orientar no sistema.`,
+      text: `Oi, ${user.name}. Eu sou a IA do Atlas e posso conversar com voce de forma natural enquanto te ajudo no sistema.`,
       createdAt: Date.now() - 1000,
       editedAt: null,
       replyTo: null,
@@ -549,7 +675,7 @@ function seedAssistantConversation(state, userId) {
       id: uid("m"),
       threadId: thread.id,
       senderId: ASSISTANT_USER_ID,
-      text: "Pergunte, por exemplo: como crio um grupo, como funciona a mencao com @, onde ficam os favoritos, como fixo ou arquivo uma conversa e onde altero perfil e privacidade.",
+      text: "Se voce mandar mais de um assunto na mesma mensagem, eu separo e respondo por partes. Nao precisa falar em formato tecnico.",
       createdAt: Date.now(),
       editedAt: null,
       replyTo: null,
@@ -563,7 +689,7 @@ function seedAssistantConversation(state, userId) {
       id: uid("m"),
       threadId: thread.id,
       senderId: ASSISTANT_USER_ID,
-      text: "Tambem posso te orientar sobre adicionar contatos, responder por gesto, voltar ao fim da conversa, gravar audio, usar a camera, sincronizar entre dispositivos e organizar grupos.",
+      text: "Eu consigo te ajudar com grupos, contatos, mencoes, audio, camera, mobile, sincronizacao, privacidade e tambem acompanhar conversas paralelas sem perder o contexto.",
       createdAt: Date.now() + 1,
       editedAt: null,
       replyTo: null,
@@ -1532,7 +1658,7 @@ export function sendMessage(userId, conversationId, payload) {
         id: uid("m"),
         threadId: thread.id,
         senderId: assistantId,
-        text: buildAssistantReplyText(payload.text || ""),
+        text: buildAssistantReplyText(state, thread, userId, message),
         createdAt: Date.now() + 1,
         editedAt: null,
         replyTo: message.id,
