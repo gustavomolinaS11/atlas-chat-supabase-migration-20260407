@@ -6,6 +6,7 @@
   <title>Atlas Chat</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer">
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
@@ -47,7 +48,7 @@
               </button>
             </div>
           </div>
-          <a class="icon-link" href="settings.html" title="Configuracoes"></a>
+          <a id="settings-link" class="icon-link" href="settings.html" title="Configuracoes"></a>
           <button id="logout-btn" class="icon-btn" type="button" title="Sair"></button>
         </div>
       </div>
@@ -138,7 +139,7 @@
             <button id="voice-btn" class="icon-btn" type="button" title="Audio"></button>
           </div>
           <textarea id="composer" rows="1" placeholder="Digite uma mensagem"></textarea>
-          <button id="send-btn" class="send-btn" type="submit" title="Enviar"></button>
+          <button id="send-btn" class="send-btn" type="button" title="Enviar"></button>
         </div>
         <div class="composer-meta">
           <span id="draft-status">Draft salvo</span>
@@ -199,6 +200,7 @@
       <div class="camera-actions">
         <span id="camera-status" class="muted-line">Abrindo camera...</span>
         <div class="camera-action-buttons">
+          <button id="camera-flip-btn" class="ghost-btn compact" type="button">Rotacionar camera</button>
           <button id="camera-fallback-btn" class="ghost-btn compact" type="button">Usar seletor</button>
           <button id="camera-capture-btn" class="primary-btn" type="button" disabled>Capturar</button>
         </div>

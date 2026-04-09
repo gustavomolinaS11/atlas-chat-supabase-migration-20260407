@@ -117,6 +117,7 @@ const ICONS = {
   smile: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8.5 10h.01M15.5 10h.01M8 14a5 5 0 0 0 8 0M22 12A10 10 0 1 1 12 2a10 10 0 0 1 10 10Z"/></svg>',
   image: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16v12H4zM8 10h.01M20 16l-5-5-4 4-2-2-5 5"/></svg>',
   camera: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7.5 8.8 5h6.4L17 7.5h2A2 2 0 0 1 21 9.5v8A2 2 0 0 1 19 19.5H5a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2Zm5 2.5a4 4 0 1 0 4 4 4 4 0 0 0-4-4Z"/></svg>',
+  rotateCamera: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 0 1 13.7-5.6L20 8.7V4h-4.7l1.8 1.8A8 8 0 1 0 20 12"/><path d="M12 8v4l3 2"/></svg>',
   file: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3h6l5 5v13H8zM14 3v5h5"/></svg>',
   users: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 11a3 3 0 1 0-3-3 3 3 0 0 0 3 3Zm8 1.5a2.5 2.5 0 1 0-2.5-2.5 2.5 2.5 0 0 0 2.5 2.5ZM3.5 20a5.5 5.5 0 0 1 11 0M14 20a4 4 0 0 1 7 0"/></svg>',
   mic: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15a3 3 0 0 0 3-3V7a3 3 0 0 0-6 0v5a3 3 0 0 0 3 3Zm0 0v4m-4-6a4 4 0 0 0 8 0"/></svg>',
@@ -147,6 +148,7 @@ const elements = {
   quickCreateMenu: document.getElementById("quick-create-menu"),
   sessionMenuBtn: document.getElementById("session-menu-btn"),
   sessionMenu: document.getElementById("session-menu"),
+  settingsLink: document.getElementById("settings-link"),
   sessionAvatar: document.getElementById("session-avatar"),
   sessionPopoverAvatar: document.getElementById("session-popover-avatar"),
   sessionName: document.getElementById("session-name"),
@@ -208,6 +210,7 @@ const elements = {
   cameraVideo: document.getElementById("camera-video"),
   cameraStatus: document.getElementById("camera-status"),
   cameraCaptureBtn: document.getElementById("camera-capture-btn"),
+  cameraFlipBtn: document.getElementById("camera-flip-btn"),
   cameraFallbackBtn: document.getElementById("camera-fallback-btn"),
   undoToast: document.getElementById("undo-toast")
 };
@@ -244,6 +247,7 @@ const state = {
   cameraStream: null,
   cameraOpening: false,
   cameraReady: false,
+  cameraFacingMode: "environment",
   modalCleanup: null,
   undoTimer: null,
   undoToken: 0,
@@ -255,7 +259,10 @@ const state = {
   remoteSyncTimer: null,
   remoteSyncInFlight: null,
   remoteSyncQueued: false,
-  realtimeChannel: null
+  remoteSyncViewportLock: null,
+  realtimeChannel: null,
+  skipNextMessageClick: false,
+  messageGesture: null
 };
 
 init();
@@ -305,8 +312,13 @@ async function syncRemoteChatData(options = {}) {
     return state.remoteSyncInFlight;
   }
   const shouldPreserveConversation = preserveViewport && Boolean(state.currentConversationId);
-  const keepBottom = shouldPreserveConversation ? isFeedNearBottom() : false;
-  const viewportAnchor = shouldPreserveConversation && !keepBottom ? captureFeedViewportAnchor() : null;
+  const viewportLock = shouldPreserveConversation ? getLockedRemoteSyncViewport() : null;
+  const keepBottom = shouldPreserveConversation
+    ? (viewportLock?.keepBottom ?? isFeedNearBottom())
+    : false;
+  const feedSnapshot = shouldPreserveConversation && !keepBottom
+    ? (viewportLock?.snapshot || captureFeedScrollState())
+    : null;
 
   state.remoteSyncInFlight = (async () => {
   try {
@@ -337,7 +349,7 @@ async function syncRemoteChatData(options = {}) {
     syncConversationSelection();
     if (rerender) {
       renderAll();
-      if (viewportAnchor && restoreFeedViewportAnchor(viewportAnchor)) {
+      if (feedSnapshot && restoreFeedScrollState(feedSnapshot)) {
         return;
       }
       if (keepBottom && state.currentConversationId) {
@@ -360,9 +372,14 @@ async function syncRemoteChatData(options = {}) {
   }
 }
 
-function queueRemoteChatSync(delay = 120) {
+function queueRemoteChatSync(delay = 120, options = {}) {
   if (!currentUser) {
     return;
+  }
+  if (options.keepBottom) {
+    lockRemoteSyncViewport("bottom");
+  } else if (options.preserveCurrentPosition) {
+    lockRemoteSyncViewport("preserve");
   }
   clearTimeout(state.remoteSyncTimer);
   state.remoteSyncTimer = window.setTimeout(() => {
@@ -428,6 +445,17 @@ function captureFeedViewportAnchor() {
   };
 }
 
+function captureFeedScrollState() {
+  if (!elements.messages) {
+    return null;
+  }
+  return {
+    scrollTop: elements.messages.scrollTop,
+    scrollHeight: elements.messages.scrollHeight,
+    anchor: captureFeedViewportAnchor()
+  };
+}
+
 function restoreFeedViewportAnchor(anchor) {
   if (!anchor?.id || !elements.messages) {
     return false;
@@ -440,6 +468,39 @@ function restoreFeedViewportAnchor(anchor) {
   const currentOffset = node.getBoundingClientRect().top - containerTop;
   elements.messages.scrollTop += currentOffset - anchor.offsetTop;
   return true;
+}
+
+function restoreFeedScrollState(snapshot) {
+  if (!snapshot || !elements.messages) {
+    return false;
+  }
+  const maxScrollTop = Math.max(0, elements.messages.scrollHeight - elements.messages.clientHeight);
+  elements.messages.scrollTop = Math.min(snapshot.scrollTop, maxScrollTop);
+  if (Math.abs(elements.messages.scrollTop - snapshot.scrollTop) <= 2) {
+    return true;
+  }
+  return restoreFeedViewportAnchor(snapshot.anchor);
+}
+
+function lockRemoteSyncViewport(mode = "preserve") {
+  if (!state.currentConversationId) {
+    return;
+  }
+  state.remoteSyncViewportLock = {
+    conversationId: state.currentConversationId,
+    keepBottom: mode === "bottom",
+    snapshot: mode === "preserve" ? captureFeedScrollState() : null
+  };
+}
+
+function getLockedRemoteSyncViewport() {
+  const lock = state.remoteSyncViewportLock;
+  if (!lock || lock.conversationId !== state.currentConversationId) {
+    state.remoteSyncViewportLock = null;
+    return null;
+  }
+  state.remoteSyncViewportLock = null;
+  return lock;
 }
 
 function syncUserSettings() {
@@ -464,7 +525,7 @@ function decorateStaticIcons() {
   elements.quickCreateBtn.innerHTML = ICONS.plus;
   document.getElementById("quick-create-add-icon").innerHTML = ICONS.user;
   document.getElementById("quick-create-group-icon").innerHTML = ICONS.users;
-  document.querySelector(".icon-link").innerHTML = ICONS.gear;
+  elements.settingsLink.innerHTML = '<i class="fa-solid fa-gear" aria-hidden="true"></i>';
   document.getElementById("logout-btn").innerHTML = ICONS.logout;
   elements.conversationSearchBtn.innerHTML = ICONS.search;
   elements.detailsBtn.innerHTML = ICONS.info;
@@ -484,6 +545,8 @@ function decorateStaticIcons() {
   elements.sendBtn.innerHTML = ICONS.send;
   document.getElementById("modal-close").innerHTML = ICONS.close;
   document.getElementById("camera-close").innerHTML = ICONS.close;
+  elements.cameraFlipBtn.innerHTML = `${ICONS.rotateCamera}<span>Rotacionar camera</span>`;
+  syncComposerPrimaryAction();
 }
 
 function bindEvents() {
@@ -508,6 +571,7 @@ function bindEvents() {
   elements.cameraInput.addEventListener("change", handleImageUpload);
   elements.docInput.addEventListener("change", handleDocUpload);
   elements.voiceBtn.addEventListener("click", toggleRecording);
+  elements.sendBtn.addEventListener("click", handlePrimaryComposerAction);
   elements.quickCreateBtn.addEventListener("click", toggleQuickCreateMenu);
   elements.quickCreateMenu.addEventListener("click", handleQuickCreateMenuClick);
   document.getElementById("logout-btn").addEventListener("click", handleLogout);
@@ -538,7 +602,13 @@ function bindEvents() {
     document.getElementById("camera-close").addEventListener("click", closeCameraPreview);
     elements.cameraLayer.addEventListener("click", (event) => { if (event.target === elements.cameraLayer) closeCameraPreview(); });
     elements.cameraCaptureBtn.addEventListener("click", captureCameraFrame);
+    elements.cameraFlipBtn.addEventListener("click", rotateCameraPreview);
     elements.cameraFallbackBtn.addEventListener("click", useCameraFileFallback);
+    elements.messages.addEventListener("pointerdown", handleMessageGestureStart, { passive: true });
+    elements.messages.addEventListener("pointermove", handleMessageGestureMove, { passive: true });
+    elements.messages.addEventListener("pointerup", handleMessageGestureEnd, { passive: true });
+    elements.messages.addEventListener("pointercancel", handleMessageGestureEnd, { passive: true });
+    elements.messages.addEventListener("pointerleave", handleMessageGestureEnd, { passive: true });
     window.addEventListener("pageshow", refreshSessionState);
     window.addEventListener("beforeunload", flushPendingDraftSave);
     window.addEventListener("pagehide", teardownRealtimeSync);
@@ -610,6 +680,22 @@ function renderAll() {
   renderDrawer();
   syncFeedSpacing();
   syncResponsiveLayout();
+}
+
+function renderConversationPreserveViewport(options = {}) {
+  const keepBottom = isFeedNearBottom();
+  const feedSnapshot = keepBottom ? null : captureFeedScrollState();
+  renderConversation();
+  if (keepBottom) {
+    scrollMessagesToBottom();
+    return;
+  }
+  if (feedSnapshot && restoreFeedScrollState(feedSnapshot)) {
+    return;
+  }
+  if (options.messageId) {
+    scrollMessageIntoView(options.messageId, { behavior: "auto", block: "nearest" });
+  }
 }
 
 function isMobileViewport() {
@@ -1211,6 +1297,7 @@ function renderConversation() {
   }
   elements.composer.value = getDraft(currentUser.id, state.currentConversationId);
   autoResizeComposer();
+  syncComposerPrimaryAction();
   renderReplyBanner(messages);
   renderAttachmentPreview();
   renderConversationSearch();
@@ -1294,6 +1381,8 @@ function renderMentionJumpButton() {
 function renderMemberRow(details, member) {
   const isAdmin = details.admins.includes(member.id);
   const canManageMember = details.canManage && member.id !== currentUser.id;
+  const knownContacts = new Set(getCurrentUser()?.contactIds || []);
+  const canAddContact = member.id !== currentUser.id && !knownContacts.has(member.id);
   return `
     <div class="member-row">
       ${renderAvatarMarkup(member, "member-avatar", member.name)}
@@ -1302,7 +1391,10 @@ function renderMemberRow(details, member) {
         <span class="muted-line">@${escapeHtml(member.username)}</span>
       </div>
       ${isAdmin ? '<span class="role-chip">Admin</span>' : ""}
-      ${canManageMember ? `<div class="member-actions"><button class="icon-btn mini" data-drawer-action="toggle-admin" data-user-id="${member.id}" type="button" title="Admin">${ICONS.crown}</button><button class="icon-btn mini" data-drawer-action="remove-member" data-user-id="${member.id}" type="button" title="Remover">${ICONS.remove}</button></div>` : ""}
+      <div class="member-actions">
+        ${canAddContact ? `<button class="icon-btn mini" data-drawer-action="add-contact" data-user-id="${member.id}" type="button" title="Adicionar contato">${ICONS.plus}</button>` : ""}
+        ${canManageMember ? `<button class="icon-btn mini" data-drawer-action="toggle-admin" data-user-id="${member.id}" type="button" title="Admin">${ICONS.crown}</button><button class="icon-btn mini" data-drawer-action="remove-member" data-user-id="${member.id}" type="button" title="Remover">${ICONS.remove}</button>` : ""}
+      </div>
     </div>
   `;
 }
@@ -1570,11 +1662,13 @@ function renderAttachmentPreview() {
   if (!pieces.length) {
     elements.attachmentPreview.classList.add("hidden");
     elements.attachmentPreview.innerHTML = "";
+    syncComposerPrimaryAction();
     return;
   }
   elements.attachmentPreview.classList.remove("hidden");
   elements.attachmentPreview.innerHTML = pieces.join("");
   hydrateAudioPlayers(elements.attachmentPreview);
+  syncComposerPrimaryAction();
 }
 
 function updateRecordingPreviewCard() {
@@ -2132,6 +2226,7 @@ async function openMentionDirectChat(handle) {
 
 function handleComposerInput() {
   autoResizeComposer();
+  syncComposerPrimaryAction();
   if (!state.currentConversationId) {
     closeMentionPanel();
     return;
@@ -2208,7 +2303,7 @@ async function handleSend(event) {
         attachments: uploaded.attachments,
         metadata: uploaded.metadata
       });
-      await syncRemoteChatData();
+      queueRemoteChatSync(0, { keepBottom: true });
     } else {
       sendMessage(currentUser.id, state.currentConversationId, {
         text,
@@ -2228,8 +2323,8 @@ async function handleSend(event) {
         }
       });
     }
-  } catch {
-    alert("Nao foi possivel enviar a mensagem. Tente reduzir o tamanho da imagem ou limpar dados antigos.");
+  } catch (error) {
+    alert(error?.message || "Nao foi possivel enviar a mensagem agora.");
     return;
   }
   elements.composer.value = "";
@@ -2305,6 +2400,7 @@ function setVoiceRecordingState(active) {
   elements.voiceBtn.classList.toggle("active", active);
   elements.voiceBtn.innerHTML = active ? ICONS.stop : ICONS.mic;
   elements.voiceBtn.setAttribute("title", active ? "Parar gravacao" : "Audio");
+  syncComposerPrimaryAction();
 }
 
 function stopRecordingStream() {
@@ -2465,7 +2561,104 @@ async function toggleRecording() {
   }
 }
 
+function clearMessageGesture() {
+  if (!state.messageGesture) {
+    return;
+  }
+  clearTimeout(state.messageGesture.longPressTimer);
+  if (state.messageGesture.row?.isConnected) {
+    state.messageGesture.row.classList.remove("gesture-active");
+    state.messageGesture.row.style.removeProperty("--swipe-offset");
+  }
+  state.messageGesture = null;
+}
+
+function isMessageGestureTargetAllowed(target) {
+  return !target.closest("button, a, input, textarea, select, label, .audio-player, .doc-pill, .reply-snippet");
+}
+
+function handleMessageGestureStart(event) {
+  if (event.pointerType === "mouse" || state.openMessageMenuId || state.openReactionPickerId) {
+    return;
+  }
+  const row = event.target.closest(".message-row");
+  if (!row || !row.dataset.messageId || !isMessageGestureTargetAllowed(event.target)) {
+    return;
+  }
+  clearMessageGesture();
+  const gesture = {
+    pointerId: event.pointerId,
+    row,
+    messageId: row.dataset.messageId,
+    startX: event.clientX,
+    startY: event.clientY,
+    dx: 0,
+    dy: 0,
+    longPressTriggered: false,
+    longPressTimer: window.setTimeout(() => {
+      if (state.selectionMode || !state.messageGesture || state.messageGesture.messageId !== row.dataset.messageId) {
+        return;
+      }
+      state.selectionMode = true;
+      state.selectedMessageIds = [row.dataset.messageId];
+      state.skipNextMessageClick = true;
+      state.messageGesture.longPressTriggered = true;
+      renderAll();
+    }, 360)
+  };
+  state.messageGesture = gesture;
+}
+
+function handleMessageGestureMove(event) {
+  const gesture = state.messageGesture;
+  if (!gesture || gesture.pointerId !== event.pointerId) {
+    return;
+  }
+  gesture.dx = event.clientX - gesture.startX;
+  gesture.dy = event.clientY - gesture.startY;
+  if (Math.abs(gesture.dy) > 18 && Math.abs(gesture.dy) > Math.abs(gesture.dx)) {
+    clearMessageGesture();
+    return;
+  }
+  if (gesture.longPressTriggered) {
+    return;
+  }
+  if (gesture.dx > 8 && Math.abs(gesture.dx) > Math.abs(gesture.dy)) {
+    clearTimeout(gesture.longPressTimer);
+    gesture.row.classList.add("gesture-active");
+    gesture.row.style.setProperty("--swipe-offset", `${Math.min(gesture.dx, 88)}px`);
+  } else if (gesture.row.classList.contains("gesture-active")) {
+    gesture.row.classList.remove("gesture-active");
+    gesture.row.style.removeProperty("--swipe-offset");
+  }
+}
+
+function handleMessageGestureEnd(event) {
+  const gesture = state.messageGesture;
+  if (!gesture || gesture.pointerId !== event.pointerId) {
+    return;
+  }
+  clearTimeout(gesture.longPressTimer);
+  const shouldReply = !gesture.longPressTriggered && !state.selectionMode && gesture.dx >= 72 && Math.abs(gesture.dx) > Math.abs(gesture.dy);
+  const messageId = gesture.messageId;
+  clearMessageGesture();
+  if (gesture.longPressTriggered) {
+    state.skipNextMessageClick = true;
+    return;
+  }
+  if (shouldReply) {
+    state.replyTo = messageId;
+    state.skipNextMessageClick = true;
+    renderConversationPreserveViewport({ messageId });
+    elements.composer.focus();
+  }
+}
+
 function handleMessageClick(event) {
+  if (state.skipNextMessageClick) {
+    state.skipNextMessageClick = false;
+    return;
+  }
   const articleTarget = event.target.closest(".message-row");
   if (state.selectionMode && articleTarget && !event.target.closest("button[data-action]") && !event.target.closest("a") && !event.target.closest("audio") && !event.target.closest("input")) {
     toggleMessageSelection(articleTarget.dataset.messageId);
@@ -2515,18 +2708,18 @@ function handleMessageClick(event) {
   if (action === "toggle-menu") {
     state.openReactionPickerId = null;
     state.openMessageMenuId = state.openMessageMenuId === messageId ? null : messageId;
-    renderConversation();
+    renderConversationPreserveViewport({ messageId });
     return;
   }
   if (action === "toggle-reactions") {
     state.openMessageMenuId = null;
     state.openReactionPickerId = state.openReactionPickerId === messageId ? null : messageId;
-    renderConversation();
+    renderConversationPreserveViewport({ messageId });
     return;
   }
   if (action === "reply") {
     state.replyTo = messageId;
-    renderConversation();
+    renderConversationPreserveViewport({ messageId });
     elements.composer.focus();
     return;
   }
@@ -2561,12 +2754,12 @@ function handleMessageClick(event) {
     state.openReactionPickerId = null;
     if (message?.isRemote) {
       setPinnedMessage({ conversationId: message.threadId, messageId })
-        .then(() => syncRemoteChatData())
-        .then(() => renderConversation())
+        .then(() => queueRemoteChatSync(0, { preserveCurrentPosition: true }))
+        .then(() => renderConversationPreserveViewport({ messageId }))
         .catch((error) => alert(error?.message || "Nao foi possivel fixar a mensagem."));
     } else {
       togglePinned(currentUser.id, messageId);
-      renderConversation();
+      renderConversationPreserveViewport({ messageId });
     }
     return;
   }
@@ -2575,12 +2768,12 @@ function handleMessageClick(event) {
     state.openReactionPickerId = null;
     if (message?.isRemote) {
       toggleMessageFavorite(messageId)
-        .then(() => syncRemoteChatData())
-        .then(() => renderConversation())
+        .then(() => queueRemoteChatSync(0, { preserveCurrentPosition: true }))
+        .then(() => renderConversationPreserveViewport({ messageId }))
         .catch((error) => alert(error?.message || "Nao foi possivel favoritar a mensagem."));
     } else {
       toggleFavorite(currentUser.id, messageId);
-      renderConversation();
+      renderConversationPreserveViewport({ messageId });
     }
     return;
   }
@@ -2589,12 +2782,12 @@ function handleMessageClick(event) {
     state.openReactionPickerId = null;
     if (message?.isRemote) {
       setMessageReaction(messageId, target.dataset.reaction)
-        .then(() => syncRemoteChatData())
-        .then(() => renderConversation())
+        .then(() => queueRemoteChatSync(0, { preserveCurrentPosition: true }))
+        .then(() => renderConversationPreserveViewport({ messageId }))
         .catch((error) => alert(error?.message || "Nao foi possivel reagir a essa mensagem."));
     } else {
       toggleReaction(currentUser.id, messageId, target.dataset.reaction);
-      renderConversation();
+      renderConversationPreserveViewport({ messageId });
     }
   }
 }
@@ -2614,6 +2807,13 @@ function handleDrawerClick(event) {
   }
   if (action === "add-members") {
     openAddMembersModal(details);
+  }
+  if (action === "add-contact") {
+    upsertMyContact({ contactUserId: button.dataset.userId })
+      .then(() => syncRemoteChatData())
+      .then(() => renderDrawer())
+      .catch((error) => alert(error?.message || "Nao foi possivel adicionar esse contato."));
+    return;
   }
   if (action === "toggle-admin") {
     if (details.isRemote) {
@@ -2762,7 +2962,7 @@ function handleOuterClick(event) {
   }
   if (state.openReactionPickerId && !event.target.closest(".reaction-strip")) {
     state.openReactionPickerId = null;
-    renderConversation();
+    renderConversationPreserveViewport();
   }
   if (state.openConversationMenu && !event.target.closest(".conversation-menu-wrap")) {
     state.openConversationMenu = false;
@@ -3227,6 +3427,7 @@ function clearPending() {
   state.pendingAudio = [];
   state.recordingLevels = [];
   state.recordingWaveform = [];
+  syncComposerPrimaryAction();
 }
 
 function extensionForMimeType(mimeType, fallback = "bin") {
@@ -3312,6 +3513,51 @@ function setComposerEnabled(enabled) {
   elements.fileBtn.disabled = !enabled;
   elements.voiceBtn.disabled = !enabled;
   elements.sendBtn.disabled = !enabled;
+  elements.cameraFlipBtn.disabled = state.cameraOpening;
+  syncComposerPrimaryAction();
+}
+
+function composerHasText() {
+  return Boolean(elements.composer.value.trim());
+}
+
+function composerHasAttachments() {
+  return Boolean(state.pendingImages.length || state.pendingDocs.length || state.pendingAudio.length);
+}
+
+function getPrimaryComposerActionMode() {
+  if (state.recorder) {
+    return "stop";
+  }
+  return composerHasText() || composerHasAttachments() ? "send" : "audio";
+}
+
+function syncComposerPrimaryAction() {
+  const mode = getPrimaryComposerActionMode();
+  elements.sendBtn.dataset.mode = mode;
+  elements.sendBtn.classList.toggle("audio-mode", mode !== "send");
+  if (mode === "stop") {
+    elements.sendBtn.innerHTML = ICONS.stop;
+    elements.sendBtn.setAttribute("title", "Parar gravacao");
+  } else if (mode === "audio") {
+    elements.sendBtn.innerHTML = ICONS.mic;
+    elements.sendBtn.setAttribute("title", "Gravar audio");
+  } else {
+    elements.sendBtn.innerHTML = ICONS.send;
+    elements.sendBtn.setAttribute("title", "Enviar");
+  }
+  const usePrimaryAudio = mode !== "send";
+  elements.voiceBtn.classList.toggle("hidden", usePrimaryAudio);
+}
+
+function handlePrimaryComposerAction(event) {
+  const mode = elements.sendBtn.dataset.mode || "send";
+  if (mode === "send") {
+    handleSend(event);
+    return;
+  }
+  event.preventDefault();
+  toggleRecording();
 }
 
 function autoResizeComposer(reset = false) {
@@ -3480,11 +3726,12 @@ async function openCameraPreview() {
   state.cameraOpening = true;
   elements.cameraStatus.textContent = "Abrindo camera...";
   elements.cameraCaptureBtn.disabled = true;
+  elements.cameraFlipBtn.disabled = true;
   elements.cameraLayer.classList.remove("hidden");
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
       video: {
-        facingMode: { ideal: "environment" },
+        facingMode: { ideal: state.cameraFacingMode },
         width: { ideal: 1280 },
         height: { ideal: 720 }
       },
@@ -3499,6 +3746,7 @@ async function openCameraPreview() {
     state.cameraReady = true;
     elements.cameraStatus.textContent = "Posicione a camera e capture a foto.";
     elements.cameraCaptureBtn.disabled = false;
+    elements.cameraFlipBtn.disabled = false;
   } catch {
     closeCameraPreview();
     if (confirm("Nao foi possivel abrir a camera. Deseja usar o seletor do aparelho?")) {
@@ -3506,6 +3754,16 @@ async function openCameraPreview() {
     }
   } finally {
     state.cameraOpening = false;
+  }
+}
+
+async function rotateCameraPreview() {
+  if (state.cameraOpening || !navigator.mediaDevices?.getUserMedia) {
+    return;
+  }
+  state.cameraFacingMode = state.cameraFacingMode === "environment" ? "user" : "environment";
+  if (!elements.cameraLayer.classList.contains("hidden")) {
+    await openCameraPreview();
   }
 }
 
@@ -3536,6 +3794,7 @@ function closeCameraPreview() {
   stopCameraPreviewStream();
   elements.cameraLayer.classList.add("hidden");
   elements.cameraCaptureBtn.disabled = true;
+  elements.cameraFlipBtn.disabled = false;
   elements.cameraStatus.textContent = "Abrindo camera...";
 }
 

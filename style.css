@@ -51,6 +51,7 @@ a { color: inherit; text-decoration: none; }
 button, input, textarea { font: inherit; }
 button { cursor: pointer; }
 svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.icon-link i, .icon-btn i { font-size: 18px; line-height: 1; }
 .hidden { display: none !important; }
 
 .brand {
@@ -265,6 +266,7 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
   gap: 12px;
 }
 .sidebar-head-actions, .chat-actions, .composer-tools, .detail-actions, .member-actions { display: flex; align-items: center; gap: 8px; }
+.member-actions { flex-wrap: wrap; justify-content: flex-end; }
 .sidebar-head-actions { margin-left: auto; }
 .conversation-menu-wrap, .quick-create-wrap, .session-menu-wrap { position: relative; }
 .current-user-card, .settings-profile { display: flex; align-items: center; gap: 14px; }
@@ -694,6 +696,7 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
   display: flex;
   align-items: flex-end;
   gap: 8px;
+  touch-action: pan-y;
 }
 .message-row.mine {
   justify-content: flex-end;
@@ -745,6 +748,11 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
   min-width: 0;
   display: grid;
   gap: 4px;
+  transition: transform 120ms ease;
+  will-change: transform;
+}
+.message-row.gesture-active .message-stack {
+  transform: translateX(var(--swipe-offset, 0px));
 }
 .message-row.mine .message-stack {
   justify-items: end;
@@ -1097,7 +1105,8 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
   font-size: 12px;
 }
 .check-status { color: var(--muted); font-weight: 700; }
-.check-status.read { color: #89e9ff; }
+.check-status.delivered { color: color-mix(in srgb, var(--text) 54%, transparent); }
+.check-status.read { color: var(--accent); }
 .message-menu {
   position: absolute;
   top: 34px;
@@ -1252,6 +1261,15 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
   border: none;
   border-radius: 20px;
   background: linear-gradient(135deg, var(--accent), var(--accent-alt));
+}
+.send-btn.audio-mode {
+  color: var(--text);
+  background: color-mix(in srgb, var(--panel-strong) 90%, transparent);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+.send-btn.audio-mode svg {
+  width: 18px;
+  height: 18px;
 }
 .attachment-preview {
   display: grid;
@@ -1466,6 +1484,7 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
   border: 1px solid var(--border);
   background: var(--surface);
 }
+.member-actions .icon-btn.mini { flex: 0 0 auto; }
 .member-avatar { width: 42px; height: 42px; }
 .member-meta { flex: 1; min-width: 0; }
 .floating-panel {
@@ -2066,13 +2085,43 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
   .unread-divider-line {
     display: none;
   }
-    .composer-row {
-      grid-template-columns: 1fr;
-      gap: 10px;
+  .composer-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: flex-end;
+      gap: 8px;
     }
-  .composer-tools { width: 100%; flex-wrap: wrap; }
-  .send-btn { width: 100%; }
-  #composer { min-height: 96px; }
+  .composer {
+    gap: 8px;
+    padding: 10px 10px 12px;
+  }
+  .composer-tools {
+    order: 1;
+    width: 100%;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 2px;
+    scrollbar-width: none;
+  }
+  .composer-tools::-webkit-scrollbar { display: none; }
+  .page-chat.mobile-layout #voice-btn { display: none !important; }
+  #composer {
+    order: 2;
+    flex: 1 1 0;
+    min-height: 50px;
+    max-height: 132px;
+  }
+  .send-btn {
+    order: 3;
+    width: 48px;
+    height: 48px;
+    flex: 0 0 48px;
+    border-radius: 18px;
+  }
+  .composer-meta {
+    gap: 8px;
+    font-size: 11px;
+  }
   .message-row {
     align-items: stretch;
     gap: 8px;
@@ -2105,7 +2154,16 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
   .undo-toast .ghost-btn { width: 100%; }
   .camera-card { width: calc(100vw - 16px); padding: 14px; border-radius: 22px; }
   .camera-stage { min-height: 260px; }
-  .camera-actions, .camera-action-buttons { align-items: stretch; flex-direction: column; }
-  .camera-action-buttons { width: 100%; }
-  .camera-action-buttons .ghost-btn, .camera-action-buttons .primary-btn { width: 100%; }
+  .camera-actions { align-items: stretch; flex-direction: column; }
+  .camera-action-buttons {
+    width: 100%;
+    align-items: stretch;
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+  .camera-action-buttons .ghost-btn,
+  .camera-action-buttons .primary-btn {
+    flex: 1 1 calc(50% - 6px);
+    width: auto;
+  }
 }

@@ -1037,7 +1037,7 @@ export function applyRemoteChatSnapshot(userId, snapshot) {
           if (memberId === message.senderId) {
             return [memberId, "read"];
           }
-          return [memberId, lastReadByUser[memberId] && createdAt <= lastReadByUser[memberId] ? "read" : "sent"];
+          return [memberId, lastReadByUser[memberId] && createdAt <= lastReadByUser[memberId] ? "read" : "delivered"];
         }));
         remoteMessages.push(normalizeMessage({
           id: message.id,

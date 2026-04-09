@@ -572,3 +572,41 @@ begin
   end loop;
 end
 $$;
+
+drop policy if exists "public read chat storage" on storage.objects;
+create policy "public read chat storage"
+on storage.objects
+for select
+using (
+  bucket_id in ('avatars', 'conversation-media', 'message-uploads')
+);
+
+drop policy if exists "authenticated upload chat storage" on storage.objects;
+create policy "authenticated upload chat storage"
+on storage.objects
+for insert
+to authenticated
+with check (
+  bucket_id in ('avatars', 'conversation-media', 'message-uploads')
+);
+
+drop policy if exists "authenticated update chat storage" on storage.objects;
+create policy "authenticated update chat storage"
+on storage.objects
+for update
+to authenticated
+using (
+  bucket_id in ('avatars', 'conversation-media', 'message-uploads')
+)
+with check (
+  bucket_id in ('avatars', 'conversation-media', 'message-uploads')
+);
+
+drop policy if exists "authenticated delete chat storage" on storage.objects;
+create policy "authenticated delete chat storage"
+on storage.objects
+for delete
+to authenticated
+using (
+  bucket_id in ('avatars', 'conversation-media', 'message-uploads')
+);
