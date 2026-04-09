@@ -260,6 +260,7 @@ const state = {
   remoteSyncInFlight: null,
   remoteSyncQueued: false,
   remoteSyncViewportLock: null,
+  stickFeedToBottomUntil: 0,
   realtimeChannel: null,
   skipNextMessageClick: false,
   messageGesture: null
@@ -314,7 +315,7 @@ async function syncRemoteChatData(options = {}) {
   const shouldPreserveConversation = preserveViewport && Boolean(state.currentConversationId);
   const viewportLock = shouldPreserveConversation ? getLockedRemoteSyncViewport() : null;
   const keepBottom = shouldPreserveConversation
-    ? (viewportLock?.keepBottom ?? isFeedNearBottom())
+    ? (viewportLock?.keepBottom ?? (shouldStickFeedToBottom() || isFeedNearBottom()))
     : false;
   const feedSnapshot = shouldPreserveConversation && !keepBottom
     ? (viewportLock?.snapshot || captureFeedScrollState())
@@ -376,7 +377,7 @@ function queueRemoteChatSync(delay = 120, options = {}) {
   if (!currentUser) {
     return;
   }
-  if (options.keepBottom) {
+  if (options.keepBottom || shouldStickFeedToBottom()) {
     lockRemoteSyncViewport("bottom");
   } else if (options.preserveCurrentPosition) {
     lockRemoteSyncViewport("preserve");
@@ -480,6 +481,17 @@ function restoreFeedScrollState(snapshot) {
     return true;
   }
   return restoreFeedViewportAnchor(snapshot.anchor);
+}
+
+function requestFeedStickToBottom(duration = 1200) {
+  if (!state.currentConversationId) {
+    return;
+  }
+  state.stickFeedToBottomUntil = Date.now() + duration;
+}
+
+function shouldStickFeedToBottom() {
+  return Boolean(state.currentConversationId) && Date.now() < state.stickFeedToBottomUntil;
 }
 
 function lockRemoteSyncViewport(mode = "preserve") {
@@ -683,7 +695,7 @@ function renderAll() {
 }
 
 function renderConversationPreserveViewport(options = {}) {
-  const keepBottom = isFeedNearBottom();
+  const keepBottom = options.forceBottom || shouldStickFeedToBottom() || isFeedNearBottom();
   const feedSnapshot = keepBottom ? null : captureFeedScrollState();
   renderConversation();
   if (keepBottom) {
@@ -2285,6 +2297,7 @@ async function handleSend(event) {
     return;
   }
   const details = getConversationDetails(currentUser.id, state.currentConversationId);
+  requestFeedStickToBottom(2000);
   try {
     if (details?.isRemote) {
       let conversationId = details.threadId;
@@ -2706,20 +2719,23 @@ function handleMessageClick(event) {
     return;
   }
   if (action === "toggle-menu") {
+    requestFeedStickToBottom();
     state.openReactionPickerId = null;
     state.openMessageMenuId = state.openMessageMenuId === messageId ? null : messageId;
-    renderConversationPreserveViewport({ messageId });
+    renderConversationPreserveViewport({ messageId, forceBottom: true });
     return;
   }
   if (action === "toggle-reactions") {
+    requestFeedStickToBottom();
     state.openMessageMenuId = null;
     state.openReactionPickerId = state.openReactionPickerId === messageId ? null : messageId;
-    renderConversationPreserveViewport({ messageId });
+    renderConversationPreserveViewport({ messageId, forceBottom: true });
     return;
   }
   if (action === "reply") {
+    requestFeedStickToBottom();
     state.replyTo = messageId;
-    renderConversationPreserveViewport({ messageId });
+    renderConversationPreserveViewport({ messageId, forceBottom: true });
     elements.composer.focus();
     return;
   }
@@ -2750,44 +2766,47 @@ function handleMessageClick(event) {
     return;
   }
   if (action === "pin") {
+    requestFeedStickToBottom();
     const message = getMessagesForConversation(currentUser.id, state.currentConversationId).find((item) => item.id === messageId);
     state.openReactionPickerId = null;
     if (message?.isRemote) {
       setPinnedMessage({ conversationId: message.threadId, messageId })
-        .then(() => queueRemoteChatSync(0, { preserveCurrentPosition: true }))
-        .then(() => renderConversationPreserveViewport({ messageId }))
+        .then(() => queueRemoteChatSync(0, { keepBottom: true }))
+        .then(() => renderConversationPreserveViewport({ messageId, forceBottom: true }))
         .catch((error) => alert(error?.message || "Nao foi possivel fixar a mensagem."));
     } else {
       togglePinned(currentUser.id, messageId);
-      renderConversationPreserveViewport({ messageId });
+      renderConversationPreserveViewport({ messageId, forceBottom: true });
     }
     return;
   }
   if (action === "favorite") {
+    requestFeedStickToBottom();
     const message = getMessagesForConversation(currentUser.id, state.currentConversationId).find((item) => item.id === messageId);
     state.openReactionPickerId = null;
     if (message?.isRemote) {
       toggleMessageFavorite(messageId)
-        .then(() => queueRemoteChatSync(0, { preserveCurrentPosition: true }))
-        .then(() => renderConversationPreserveViewport({ messageId }))
+        .then(() => queueRemoteChatSync(0, { keepBottom: true }))
+        .then(() => renderConversationPreserveViewport({ messageId, forceBottom: true }))
         .catch((error) => alert(error?.message || "Nao foi possivel favoritar a mensagem."));
     } else {
       toggleFavorite(currentUser.id, messageId);
-      renderConversationPreserveViewport({ messageId });
+      renderConversationPreserveViewport({ messageId, forceBottom: true });
     }
     return;
   }
   if (action === "react") {
+    requestFeedStickToBottom();
     const message = getMessagesForConversation(currentUser.id, state.currentConversationId).find((item) => item.id === messageId);
     state.openReactionPickerId = null;
     if (message?.isRemote) {
       setMessageReaction(messageId, target.dataset.reaction)
-        .then(() => queueRemoteChatSync(0, { preserveCurrentPosition: true }))
-        .then(() => renderConversationPreserveViewport({ messageId }))
+        .then(() => queueRemoteChatSync(0, { keepBottom: true }))
+        .then(() => renderConversationPreserveViewport({ messageId, forceBottom: true }))
         .catch((error) => alert(error?.message || "Nao foi possivel reagir a essa mensagem."));
     } else {
       toggleReaction(currentUser.id, messageId, target.dataset.reaction);
-      renderConversationPreserveViewport({ messageId });
+      renderConversationPreserveViewport({ messageId, forceBottom: true });
     }
   }
 }
@@ -2961,8 +2980,9 @@ function handleOuterClick(event) {
     closeMentionPanel();
   }
   if (state.openReactionPickerId && !event.target.closest(".reaction-strip")) {
+    requestFeedStickToBottom();
     state.openReactionPickerId = null;
-    renderConversationPreserveViewport();
+    renderConversationPreserveViewport({ forceBottom: true });
   }
   if (state.openConversationMenu && !event.target.closest(".conversation-menu-wrap")) {
     state.openConversationMenu = false;
@@ -3612,7 +3632,17 @@ function statusIcon(status) {
 }
 
 function scrollMessagesToBottom() {
-  elements.messages.scrollTop = elements.messages.scrollHeight;
+  if (!elements.messages) {
+    return;
+  }
+  const apply = () => {
+    elements.messages.scrollTop = elements.messages.scrollHeight;
+  };
+  apply();
+  window.requestAnimationFrame(() => {
+    apply();
+    window.requestAnimationFrame(apply);
+  });
 }
 
 function getFirstUnreadMessageId(conversationId) {
