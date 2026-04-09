@@ -1,6 +1,5 @@
 node_modules/
 .DS_Store
 Thumbs.db
-src/config/supabase.js
 .env
 .env.*
