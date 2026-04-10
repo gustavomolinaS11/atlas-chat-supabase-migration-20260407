@@ -271,7 +271,8 @@ const state = {
   lastRemoteSyncAt: 0,
   realtimeChannel: null,
   skipNextMessageClick: false,
-  messageGesture: null
+  messageGesture: null,
+  composerTypingActive: false
 };
 
 init();
@@ -684,12 +685,13 @@ function bindEvents() {
   elements.composer.addEventListener("keydown", handleComposerKeydown);
   elements.composer.addEventListener("click", syncMentionSuggestions);
   elements.composer.addEventListener("keyup", handleComposerCursorChange);
+  elements.composer.addEventListener("blur", () => stopComposerTyping());
   elements.mentionPanel.addEventListener("mousedown", (event) => event.preventDefault());
   elements.mentionPanel.addEventListener("click", handleMentionPanelClick);
-  elements.emojiBtn.addEventListener("click", toggleEmojiPanel);
-  elements.imageBtn.addEventListener("click", () => elements.imageInput.click());
-  elements.cameraBtn.addEventListener("click", openCameraPreview);
-  elements.fileBtn.addEventListener("click", () => elements.docInput.click());
+  bindTapAction(elements.emojiBtn, toggleEmojiPanel);
+  bindTapAction(elements.imageBtn, () => openInputPicker(elements.imageInput));
+  bindTapAction(elements.cameraBtn, openCameraPreview);
+  bindTapAction(elements.fileBtn, () => openInputPicker(elements.docInput));
   elements.imageInput.addEventListener("change", handleImageUpload);
   elements.cameraInput.addEventListener("change", handleImageUpload);
   elements.docInput.addEventListener("change", handleDocUpload);
@@ -705,6 +707,7 @@ function bindEvents() {
   elements.conversationSearchInput.addEventListener("input", renderConversationSearch);
   elements.detailsBtn.addEventListener("click", toggleDetailsDrawer);
   elements.mobileChatBackBtn.addEventListener("click", handleMobileBack);
+  elements.chatAvatar.addEventListener("click", handlePhotoTriggerClick);
   document.getElementById("drawer-close").addEventListener("click", closeDetailsDrawer);
   elements.pinnedBanner.addEventListener("click", handlePinnedBannerClick);
   elements.mentionJumpBtn.addEventListener("click", handleMentionJump);
@@ -748,11 +751,82 @@ function bindEvents() {
     });
   }
 
+function bindTapAction(element, handler) {
+  if (!element) {
+    return;
+  }
+  let lastTouchPointerUp = 0;
+  element.addEventListener("pointerup", (event) => {
+    if (event.pointerType !== "touch" && event.pointerType !== "pen") {
+      return;
+    }
+    lastTouchPointerUp = Date.now();
+    event.preventDefault();
+    handler(event);
+  });
+  element.addEventListener("click", (event) => {
+    if (Date.now() - lastTouchPointerUp < 450) {
+      return;
+    }
+    handler(event);
+  });
+}
+
+function openInputPicker(input) {
+  if (!input) {
+    return;
+  }
+  try {
+    if (typeof input.showPicker === "function") {
+      input.showPicker();
+      return;
+    }
+  } catch {
+    // fallback to click below
+  }
+  input.click();
+}
+
 function setFilter(filter) {
   state.filter = filter;
   document.querySelectorAll(".filter-chip").forEach((button) => button.classList.toggle("active", button.dataset.filter === filter));
   syncConversationSelection();
   renderAll();
+}
+
+function syncTypingIndicatorVisibility() {
+  const shouldShow = Boolean(
+    userSettings.showTypingIndicator
+    && state.currentConversationId
+    && state.composerTypingActive
+  );
+  elements.typingIndicator.classList.toggle("hidden", !shouldShow);
+}
+
+function stopComposerTyping() {
+  clearTimeout(state.typingTimer);
+  state.typingTimer = null;
+  if (!state.composerTypingActive) {
+    syncTypingIndicatorVisibility();
+    return;
+  }
+  state.composerTypingActive = false;
+  syncTypingIndicatorVisibility();
+}
+
+function bumpComposerTyping() {
+  if (!userSettings.showTypingIndicator) {
+    stopComposerTyping();
+    return;
+  }
+  state.composerTypingActive = true;
+  syncTypingIndicatorVisibility();
+  clearTimeout(state.typingTimer);
+  state.typingTimer = setTimeout(() => {
+    state.typingTimer = null;
+    state.composerTypingActive = false;
+    syncTypingIndicatorVisibility();
+  }, 900);
 }
 
 function scheduleDraftSave(conversationId, value) {
@@ -1312,6 +1386,7 @@ function renderConversation() {
   const messages = state.currentConversationId ? getMessagesForConversation(currentUser.id, state.currentConversationId) : [];
   closeMentionPanel();
   paintAvatar(elements.chatAvatar, details || { avatar: "AT" }, details?.title || "Conversa");
+  syncPhotoTrigger(elements.chatAvatar, details, details?.title || "Conversa");
   elements.chatTitle.textContent = details?.title || "Selecione uma conversa";
   elements.chatSubtitle.textContent = details ? buildSubtitle(details) : "Troque entre contas e grupos";
   renderPinnedBanner();
@@ -1331,6 +1406,7 @@ function renderConversation() {
     elements.composerForm.classList.add("hidden");
     setComposerEnabled(false);
     autoResizeComposer(true);
+    stopComposerTyping();
     renderScrollBottomButton();
     return;
   }
@@ -1408,7 +1484,7 @@ function renderConversation() {
       row.className = `message-row${message.senderId === currentUser.id ? " mine" : ""}`;
       row.dataset.messageId = message.id;
       row.innerHTML = `
-        ${showMessageAvatar ? `<div class="message-avatar-wrap">${renderAvatarMarkup(message.sender || { avatar: "AT", photo: "" }, "member-avatar message-avatar", message.sender?.name || "Conta")}</div>` : ""}
+        ${showMessageAvatar ? `<div class="message-avatar-wrap">${renderAvatarMarkup(message.sender || { avatar: "AT", photo: "" }, "member-avatar message-avatar", message.sender?.name || "Conta", { photoAction: true })}</div>` : ""}
         <div class="message-stack">
           ${showSenderLabel ? `<div class="message-sender-label">${escapeHtml(message.sender?.name || "Conta")}</div>` : ""}
           <article class="message${message.senderId === currentUser.id ? " mine" : ""}${isSelected ? " selected" : ""}${state.selectionMode ? " selection-enabled" : ""}" id="msg-${message.id}">
@@ -1441,7 +1517,7 @@ function renderConversation() {
   renderReplyBanner(messages);
   renderAttachmentPreview();
   renderConversationSearch();
-  elements.typingIndicator.classList.toggle("hidden", !userSettings.showTypingIndicator);
+  syncTypingIndicatorVisibility();
   window.requestAnimationFrame(renderScrollBottomButton);
 }
 
@@ -1455,7 +1531,7 @@ function renderDrawer() {
   if (details.type === "direct") {
     elements.drawerBody.innerHTML = `
       <div class="detail-profile">
-        ${renderAvatarMarkup(details, "member-avatar detail-avatar", details.title)}
+        ${renderAvatarMarkup(details, "member-avatar detail-avatar", details.title, { photoAction: true })}
         <div class="detail-profile-meta">
           <strong>${escapeHtml(details.title)}</strong>
           <span class="muted-line">@${escapeHtml(details.targetUser.username)}</span>
@@ -1473,6 +1549,13 @@ function renderDrawer() {
   }
   const members = getGroupMembers(details.threadId, currentUser.id);
   elements.drawerBody.innerHTML = `
+    <div class="detail-profile">
+      ${renderAvatarMarkup(details, "member-avatar detail-avatar", details.title, { photoAction: true })}
+      <div class="detail-profile-meta">
+        <strong>${escapeHtml(details.title)}</strong>
+        <span class="muted-line">${escapeHtml(buildSubtitle(details))}</span>
+      </div>
+    </div>
     <div class="detail-card">
       <div class="detail-line"><span>Descricao</span><strong>${escapeHtml(details.description || "Sem descricao")}</strong></div>
       <div class="detail-line"><span>Membros</span><strong>${members.length}</strong></div>
@@ -1542,7 +1625,7 @@ function renderMemberRow(details, member) {
   const canAddContact = member.id !== currentUser.id && !knownContacts.has(member.id);
   return `
     <div class="member-row">
-      ${renderAvatarMarkup(member, "member-avatar", member.name)}
+      ${renderAvatarMarkup(member, "member-avatar", member.name, { photoAction: true })}
       <div class="member-meta">
         <strong>${escapeHtml(member.name)}</strong>
         <span class="muted-line">@${escapeHtml(member.username)}</span>
@@ -2199,6 +2282,7 @@ function selectConversation(conversationId) {
     return;
   }
   flushPendingDraftSave();
+  stopComposerTyping();
   state.unreadMarker = getUnreadMarkerForConversation(conversationId);
   state.mentionJumpMarker = getMentionJumpMarkerForConversation(conversationId);
   const firstUnreadMessageId = state.unreadMarker?.messageId || "";
@@ -2378,26 +2462,26 @@ async function openMentionDirectChat(handle) {
   } catch (error) {
     console.error(error);
   }
-  selectConversation(getConversationIdForDirect(targetUser.id));
+  const nextConversationId = getConversationIdForDirect(targetUser.id) || `direct:${targetUser.id}`;
+  selectConversation(nextConversationId);
 }
 
 function handleComposerInput() {
   autoResizeComposer();
   syncComposerPrimaryAction();
   if (!state.currentConversationId) {
+    stopComposerTyping();
     closeMentionPanel();
     return;
   }
   syncMentionSuggestions();
   scheduleDraftSave(state.currentConversationId, elements.composer.value);
   elements.draftStatus.textContent = "Draft salvo";
-  if (!userSettings.showTypingIndicator) {
-    elements.typingIndicator.classList.add("hidden");
+  if (!elements.composer.value.trim()) {
+    stopComposerTyping();
     return;
   }
-  elements.typingIndicator.classList.remove("hidden");
-  clearTimeout(state.typingTimer);
-  state.typingTimer = setTimeout(() => elements.typingIndicator.classList.add("hidden"), 900);
+  bumpComposerTyping();
 }
 
 function handleComposerKeydown(event) {
@@ -2499,6 +2583,7 @@ async function handleSend(event) {
   elements.composer.value = "";
   closeMentionPanel();
   autoResizeComposer(true);
+  stopComposerTyping();
   flushPendingDraftSave();
   saveDraft(currentUser.id, state.currentConversationId, "");
   clearReply();
@@ -2842,6 +2927,15 @@ function handleMessageClick(event) {
     openLightbox(imageTarget.dataset.image);
     return;
   }
+  const photoTarget = event.target.closest("[data-photo-open='true']");
+  if (photoTarget) {
+    if (state.selectionMode && articleTarget?.dataset.messageId) {
+      toggleMessageSelection(articleTarget.dataset.messageId);
+      return;
+    }
+    openLightbox(photoTarget.dataset.photoSrc, photoTarget.dataset.photoLabel);
+    return;
+  }
   if (state.selectionMode && (event.target.closest(".audio-player") || event.target.closest(".doc-pill") || event.target.closest(".reply-snippet"))) {
     toggleMessageSelection(articleTarget?.dataset.messageId);
     return;
@@ -2859,13 +2953,18 @@ function handleMessageClick(event) {
   if (!target) {
     return;
   }
+  const action = target.dataset.action;
+  if (action === "open-mention") {
+    event.preventDefault();
+    openMentionDirectChat(target.dataset.mentionHandle);
+    return;
+  }
   const messageContainer = target.closest("[data-message-id]");
   const messageId = messageContainer?.dataset.messageId;
   const article = target.closest(".message") || document.getElementById(`msg-${messageId}`);
   if (!messageId) {
     return;
   }
-  const action = target.dataset.action;
   if (action === "select-toggle") {
     toggleMessageSelection(messageId);
     return;
@@ -2893,10 +2992,6 @@ function handleMessageClick(event) {
     state.replyTo = messageId;
     renderConversationPreserveViewport({ messageId, forceBottom: true });
     elements.composer.focus();
-    return;
-  }
-  if (action === "open-mention") {
-    openMentionDirectChat(target.dataset.mentionHandle);
     return;
   }
   if (action === "jump-reply") {
@@ -2965,6 +3060,11 @@ function handleMessageClick(event) {
 }
 
 function handleDrawerClick(event) {
+  const photoTarget = event.target.closest("[data-photo-open='true']");
+  if (photoTarget) {
+    openLightbox(photoTarget.dataset.photoSrc, photoTarget.dataset.photoLabel);
+    return;
+  }
   const button = event.target.closest("button[data-drawer-action]");
   if (!button || !state.currentConversationId) {
     return;
@@ -3924,14 +4024,24 @@ function focusMessageFromUrl() {
   return false;
 }
 
-function openLightbox(src) {
+function handlePhotoTriggerClick(event) {
+  const target = event.currentTarget || event.target.closest("[data-photo-open='true']");
+  if (!target?.dataset.photoSrc) {
+    return;
+  }
+  openLightbox(target.dataset.photoSrc, target.dataset.photoLabel);
+}
+
+function openLightbox(src, label = "preview") {
   elements.lightboxImg.src = src;
+  elements.lightboxImg.alt = label;
   elements.lightbox.classList.remove("hidden");
 }
 
 function closeLightbox() {
   elements.lightbox.classList.add("hidden");
   elements.lightboxImg.src = "";
+  elements.lightboxImg.alt = "preview";
 }
 
 async function openCameraPreview() {
@@ -4155,10 +4265,15 @@ function buildInitials(value) {
     .toUpperCase() || "AT";
 }
 
-function renderAvatarMarkup(subject, className, label) {
+function renderAvatarMarkup(subject, className, label, options = {}) {
   const photo = subject?.photo || "";
   const avatar = subject?.avatar || "AT";
-  return `<div class="${className}${photo ? " has-photo" : ""}">${photo ? `<img src="${photo}" alt="${escapeHtml(label || "Avatar")}">` : escapeHtml(avatar)}</div>`;
+  const content = photo ? `<img src="${photo}" alt="${escapeHtml(label || "Avatar")}">` : escapeHtml(avatar);
+  const classes = `${className}${photo ? " has-photo" : ""}${photo && options.photoAction ? " avatar-photo-trigger" : ""}`;
+  if (photo && options.photoAction) {
+    return `<button class="${classes}" data-photo-open="true" data-photo-src="${escapeHtml(photo)}" data-photo-label="${escapeHtml(label || "Foto")}" type="button" title="Abrir foto">${content}</button>`;
+  }
+  return `<div class="${classes}">${content}</div>`;
 }
 
 function paintAvatar(element, subject, label) {
@@ -4170,6 +4285,30 @@ function paintAvatar(element, subject, label) {
   element.innerHTML = photo
     ? `<img src="${photo}" alt="${escapeHtml(label || "Avatar")}">`
     : escapeHtml(subject?.avatar || "AT");
+}
+
+function syncPhotoTrigger(element, subject, label) {
+  if (!element) {
+    return;
+  }
+  const photo = subject?.photo || "";
+  if (photo) {
+    element.dataset.photoOpen = "true";
+    element.dataset.photoSrc = photo;
+    element.dataset.photoLabel = label || "Foto";
+    element.title = `Abrir foto de ${label || "perfil"}`;
+    element.disabled = false;
+    element.classList.add("avatar-photo-trigger");
+  } else {
+    delete element.dataset.photoOpen;
+    delete element.dataset.photoSrc;
+    delete element.dataset.photoLabel;
+    element.title = "";
+    if ("disabled" in element) {
+      element.disabled = true;
+    }
+    element.classList.remove("avatar-photo-trigger");
+  }
 }
 
 function formatLastSeen(lastSeenAt, presence) {

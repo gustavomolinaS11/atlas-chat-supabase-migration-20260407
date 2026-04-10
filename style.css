@@ -78,6 +78,22 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
   font-weight: 700;
   overflow: hidden;
 }
+.avatar-photo-trigger {
+  padding: 0;
+  border: 0;
+  cursor: pointer;
+}
+.avatar-photo-trigger:disabled {
+  cursor: default;
+}
+.avatar-photo-trigger:not(:disabled) {
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+.avatar-photo-trigger:not(:disabled):hover,
+.avatar-photo-trigger:not(:disabled):focus-visible {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
+}
 .brand-mark { width: 48px; height: 48px; }
 .brand-mark.has-photo, .thread-avatar.has-photo, .chat-avatar.has-photo, .current-user-avatar.has-photo, .member-avatar.has-photo, .profile-photo-frame.has-photo {
   background: rgba(255,255,255,0.08);
